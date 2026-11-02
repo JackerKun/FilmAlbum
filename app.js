@@ -56,6 +56,7 @@
   let rollFilter = 'all';
   let frameFilter = 'all';
   let styleKind = 'all';
+  let newRollStyleKind = 'all';
   let selection = new Set();
   let selectionAnchor = null;
   let urls = new Map();
@@ -136,6 +137,18 @@
   }
   function downloadBlob(blob, name) { const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1500); }
   function currentStock() { return STOCKS[activeRoll()?.stock] || STOCKS.portra400; }
+  function is120(format = '') { return String(format).startsWith('120'); }
+  function stockIcon(stock, format = '135') {
+    const vars = `--stock:${stock.color};--stock2:${stock.color2}`;
+    if (is120(format)) return `<span class="stock-icon icon-120" style="${vars}" aria-hidden="true"><i></i><em></em></span>`;
+    return `<span class="stock-icon icon-135" style="${vars}" aria-hidden="true"><i></i><em></em></span>`;
+  }
+  function leaderMarkup(format) {
+    if (is120(format)) return `<span class="film-leader-120" aria-hidden="true"><i></i><b>120</b><small>ROLL FILM</small></span>`;
+    const topHoles = Array.from({ length: 10 }, (_, index) => `<rect x="${12 + index * 23}" y="7" width="10" height="19" rx="1"/>`).join('');
+    const bottomHoles = Array.from({ length: 4 }, (_, index) => `<rect x="${170 + index * 23}" y="222" width="10" height="19" rx="1"/>`).join('');
+    return `<svg class="film-leader" viewBox="0 0 250 248" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="leader-warm" x1="0" x2="1"><stop stop-color="#4b3021"/><stop offset=".72" stop-color="#221d18"/></linearGradient></defs><path d="M0 0H250V248H167C130 232 93 207 66 178C43 154 22 141 0 136Z" fill="url(#leader-warm)"/><g fill="#dfd3b6">${topHoles}${bottomHoles}</g><text x="65" y="114">135</text><text x="65" y="134" class="leader-note">FILM START</text></svg>`;
+  }
 
   function createRoll({ name = '未命名胶卷', stock = 'portra400', format = '135', camera = '' } = {}) {
     const roll = { id: uid(), name, stock, format, camera, lens: '', location: '', date: '', process: '', notes: '', status: 'shooting', createdAt: Date.now(), frames: [] };
@@ -195,7 +208,8 @@
       return `<button class="film-frame ${index === activeFrame ? 'active' : ''} ${frame.developed ? '' : 'undeveloped'}" data-frame="${index}" style="${frameStyle(frame, roll.stock)}">${media}<span class="frame-badges">${badges}</span><span class="frame-no">${String(index + 1).padStart(2, '0')}A</span></button>`;
     }));
     if (version !== renderVersion) return;
-    $('#film-strip').innerHTML = `<span class="film-leader" aria-hidden="true"><i></i><b>135</b><small>FILM START</small></span>${cards.join('')}`; updateCanister();
+    $('#film-rail').classList.toggle('format-120', is120(roll.format));
+    $('#film-strip').innerHTML = `${leaderMarkup(roll.format)}${cards.join('')}`; updateCanister();
     requestAnimationFrame(() => $('#film-strip .active')?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }));
   }
   async function renderContact(version) {
@@ -233,18 +247,26 @@
     $('#develop-rating').innerHTML = [1, 2, 3, 4, 5].map(value => `<button data-rating="${value}" class="${value <= rating ? 'active' : ''}" aria-label="${value} 星">★</button>`).join('');
   }
   function updateCanister() {
-    const stock = currentStock(); const canister = $('#canister');
+    const stock = currentStock(); const canister = $('#canister'); const medium = is120(activeRoll()?.format);
+    canister.hidden = medium; $('#roll120').hidden = !medium; $('#film-hardware').classList.toggle('medium-format', medium);
     canister.style.setProperty('--stock', stock.color); canister.style.setProperty('--stock2', stock.color2);
     $('#cassette-brand').textContent = stock.brand; $('#cassette-name').textContent = stock.name.replace(/\s?\d+T?$/, ''); $('#cassette-iso').textContent = stock.iso;
+    const roll120 = $('#roll120'); roll120.style.setProperty('--stock', stock.color); roll120.style.setProperty('--stock2', stock.color2);
+    $('#roll120-brand').textContent = stock.brand; $('#roll120-name').textContent = stock.name.replace(/\s?\d+T?$/, ''); $('#roll120-iso').textContent = stock.iso;
   }
   function renderInspector() {
     const roll = activeRoll(); const frame = activeItem();
-    $('#stock-picker').innerHTML = Object.entries(STOCKS).filter(([, stock]) => styleKind === 'all' || stock.group === styleKind).map(([id, stock]) => `<button class="stock-card ${roll?.stock === id ? 'active' : ''}" data-stock="${id}" style="--stock:${stock.color}"><i></i><b>${stock.name}</b><small>${stock.brand}</small></button>`).join('');
+    $('#stock-picker').innerHTML = Object.entries(STOCKS).filter(([, stock]) => styleKind === 'all' || stock.group === styleKind).map(([id, stock]) => `<button class="stock-card ${roll?.stock === id ? 'active' : ''}" data-stock="${id}">${stockIcon(stock, roll?.format)}<span><b>${stock.name}</b><small>${stock.brand} · ${stock.kind}</small></span></button>`).join('');
     const edit = frameEdit(frame);
     $('#adjustment-list').innerHTML = ADJUSTMENTS.map(([key, label, min, max]) => `<div class="adjustment"><div><label for="adj-${key}">${label}</label><output id="out-${key}">${formatAdjustment(key, edit[key])}</output></div><input id="adj-${key}" data-adjustment="${key}" type="range" min="${min}" max="${max}" value="${edit[key]}" ${frame ? '' : 'disabled'}></div>`).join('');
     $('#develop-mode').checked = settings.developMode;
     for (const [id, key] of [['meta-name', 'name'], ['meta-format', 'format'], ['meta-status', 'status'], ['meta-camera', 'camera'], ['meta-lens', 'lens'], ['meta-location', 'location'], ['meta-date', 'date'], ['meta-process', 'process'], ['meta-notes', 'notes']]) $('#'+id).value = roll?.[key] || '';
     renderAnalysisSummary();
+  }
+  function renderNewRollPicker() {
+    const format = $('#new-roll-format').value;
+    const selected = $('#new-roll-stock').value || 'portra400';
+    $('#new-roll-stock-grid').innerHTML = Object.entries(STOCKS).filter(([, stock]) => newRollStyleKind === 'all' || stock.group === newRollStyleKind).map(([id, stock]) => `<button type="button" class="new-stock-card ${selected === id ? 'active' : ''}" data-new-stock="${id}">${stockIcon(stock, format)}<span><b>${stock.name}</b><small>${stock.brand} · ISO ${stock.iso}</small></span></button>`).join('');
   }
   function formatAdjustment(key, value) { if (['grain', 'halation', 'vignette', 'fade'].includes(key)) return `${value}%`; return value > 0 ? `+${value}` : String(value); }
   function renderSelectionState() { $('#selection-summary').hidden = !selection.size; $('#selection-count').textContent = selection.size; }
@@ -366,8 +388,11 @@
     $$('[data-inspector]').forEach(button => button.onclick = () => switchInspector(button.dataset.inspector));
     $('#btn-import').onclick = $('#btn-empty-import').onclick = () => $('#file-input').click();
     $('#file-input').onchange = event => { addFiles(event.target.files); event.target.value = ''; };
-    $('#btn-new-roll').onclick = () => $('#new-roll-dialog').showModal();
+    $('#btn-new-roll').onclick = () => { renderNewRollPicker(); $('#new-roll-dialog').showModal(); };
     $('#new-roll-form').onsubmit = event => { if (event.submitter?.value === 'cancel') return; checkpoint(); createRoll({ name: $('#new-roll-name').value.trim() || '未命名胶卷', stock: $('#new-roll-stock').value, format: $('#new-roll-format').value, camera: $('#new-roll-camera').value.trim() }); toast('新胶卷已创建'); };
+    $('#new-roll-format').onchange = renderNewRollPicker;
+    $('#new-roll-style-filter').onclick = event => { const button = event.target.closest('[data-new-style-kind]'); if (!button) return; newRollStyleKind = button.dataset.newStyleKind; $$('[data-new-style-kind]').forEach(node => node.classList.toggle('active', node === button)); renderNewRollPicker(); };
+    $('#new-roll-stock-grid').onclick = event => { const card = event.target.closest('[data-new-stock]'); if (!card) return; $('#new-roll-stock').value = card.dataset.newStock; renderNewRollPicker(); };
     $('#btn-demo').onclick = $('#btn-empty-demo').onclick = loadDemo;
     $('#roll-search').oninput = renderRollList;
     $('#roll-list').onclick = event => { const card = event.target.closest('[data-roll]'); if (!card) return; activeRollId = card.dataset.roll; activeFrame = 0; selection.clear(); renderAll(); };
@@ -409,6 +434,7 @@
     $('#btn-fullscreen').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
     setupPanZoom('develop', '#develop-canvas', '#develop-zoom'); setupPanZoom('gallery', '#gallery-stage', '#gallery-zoom');
     $('#gallery-close').onclick = closeGallery; $('#gallery-prev').onclick = () => stepGallery(-1); $('#gallery-next').onclick = () => stepGallery(1);
+    $('#gallery-toggle-thumbs').onclick = () => { const collapsed = $('#gallery').classList.toggle('thumbs-collapsed'); $('#gallery-toggle-thumbs').textContent = collapsed ? '展开缩略图' : '收起缩略图'; };
     $('#gallery-thumbs').onclick = event => { const thumb = event.target.closest('[data-gallery-frame]'); if (!thumb) return; galleryIndex = Number(thumb.dataset.galleryFrame); activeFrame = galleryIndex; resetZoom('gallery'); renderGallery(); };
     $('#gallery-original').onclick = () => { const frame = activeRoll()?.frames[galleryIndex]; if (!frame) return; if (!frame.developed) { checkpoint(); frame.developed = true; save(); renderGallery(); renderAll(); toast(`${currentStock().name} 风格已应用`); } else { const media = $('#gallery-media'); media.classList.toggle('original'); $('#gallery-original').textContent = media.classList.contains('original') ? '返回胶卷风格' : '查看原片'; } };
     $('#btn-project').onclick = event => { event.stopPropagation(); $('#project-menu').hidden = !$('#project-menu').hidden; };
@@ -421,7 +447,7 @@
   }
 
   function initialize() {
-    $('#new-roll-stock').innerHTML = Object.entries(STOCKS).map(([id, stock]) => `<option value="${id}">${stock.brand} · ${stock.name}</option>`).join('');
+    renderNewRollPicker();
     bind(); navigator.storage?.persist?.().catch(() => {});
     if (!rolls.length && new URLSearchParams(location.search).has('demo')) loadDemo(); else renderAll();
   }
