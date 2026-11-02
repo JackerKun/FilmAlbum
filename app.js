@@ -291,18 +291,25 @@
   function stepFrame(delta) { const frames = activeRoll()?.frames || []; if (!frames.length) return; activeFrame = (activeFrame + delta + frames.length) % frames.length; resetZoom('develop'); renderAll(); }
   function applyZoom(scope) {
     const state = zoomState[scope]; const media = $(`#${scope === 'develop' ? 'develop' : 'gallery'}-media`); const target = media?.querySelector('img,video'); if (!target) return;
-    target.style.transform = `translate3d(${state.x}px,${state.y}px,0) scale(${state.scale})`; target.style.transformOrigin = 'center'; media.classList.toggle('zoomed', state.scale > 1.01); const output = $(`#${scope}-zoom output`); if (output) output.textContent = `${Math.round(state.scale * 100)}%`;
+    target.style.transform = `translate3d(${state.x}px,${state.y}px,0) scale(${state.scale})`; target.style.transformOrigin = '50% 50%'; media.classList.toggle('zoomed', state.scale > 1.01); media.closest('.develop-canvas,.gallery-stage')?.classList.toggle('can-pan', state.scale > 1.01); const output = $(`#${scope}-zoom output`); if (output) output.textContent = `${Math.round(state.scale * 100)}%`;
   }
   function resetZoom(scope) { zoomState[scope] = { scale: 1, x: 0, y: 0 }; applyZoom(scope); }
   function changeZoom(scope, direction, clientX, clientY) {
     const state = zoomState[scope]; const old = state.scale; state.scale = direction === 'fit' ? 1 : Math.max(.5, Math.min(6, state.scale * (direction === 'in' ? 1.18 : .85)));
-    if (state.scale <= 1) { state.x = 0; state.y = 0; } else if (clientX != null && old > 0) { const ratio = state.scale / old; state.x *= ratio; state.y *= ratio; }
+    if (state.scale <= 1) { state.x = 0; state.y = 0; }
+    else {
+      const ratio = state.scale / old; const stage = $(`#${scope === 'develop' ? 'develop-canvas' : 'gallery-stage'}`);
+      if (Number.isFinite(clientX) && Number.isFinite(clientY) && stage) {
+        const rect = stage.getBoundingClientRect(); const anchorX = clientX - rect.left - rect.width / 2; const anchorY = clientY - rect.top - rect.height / 2;
+        state.x = anchorX - (anchorX - state.x) * ratio; state.y = anchorY - (anchorY - state.y) * ratio;
+      } else { state.x *= ratio; state.y *= ratio; }
+    }
     applyZoom(scope);
   }
   function setupPanZoom(scope, stageSelector, toolbarSelector) {
     const stage = $(stageSelector); let pan = null;
     stage.addEventListener('wheel', event => { if (!event.target.closest('img,video')) return; event.preventDefault(); changeZoom(scope, event.deltaY < 0 ? 'in' : 'out', event.clientX, event.clientY); }, { passive: false });
-    stage.addEventListener('pointerdown', event => { if (!event.target.closest('img,video') || zoomState[scope].scale <= 1) return; pan = { x: event.clientX, y: event.clientY, ox: zoomState[scope].x, oy: zoomState[scope].y }; stage.setPointerCapture(event.pointerId); stage.classList.add('panning'); });
+    stage.addEventListener('pointerdown', event => { if (event.button !== 0 || event.target.closest('button') || !event.target.closest('.develop-media,.gallery-media') || zoomState[scope].scale <= 1) return; pan = { x: event.clientX, y: event.clientY, ox: zoomState[scope].x, oy: zoomState[scope].y }; stage.setPointerCapture(event.pointerId); stage.classList.add('panning'); event.preventDefault(); });
     stage.addEventListener('pointermove', event => { if (!pan) return; zoomState[scope].x = pan.ox + event.clientX - pan.x; zoomState[scope].y = pan.oy + event.clientY - pan.y; applyZoom(scope); });
     stage.addEventListener('pointerup', () => { pan = null; stage.classList.remove('panning'); }); stage.addEventListener('pointercancel', () => { pan = null; stage.classList.remove('panning'); });
     stage.addEventListener('dblclick', event => { if (event.target.closest('img,video')) resetZoom(scope); });
