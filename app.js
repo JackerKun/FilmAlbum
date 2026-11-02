@@ -1,53 +1,366 @@
 (() => {
   'use strict';
+
   const STOCKS = {
-    velvia50:{name:'Velvia 50',brand:'FUJIFILM',iso:'50',color:'#78143c',color2:'#a67b43',filter:'saturate(1.24) contrast(1.08) brightness(.98) hue-rotate(-3deg)'},
-    portra400:{name:'PORTRA 400',brand:'KODAK',iso:'400',color:'#2c5c49',color2:'#e0b55f',filter:'saturate(.88) contrast(.96) brightness(1.04) sepia(.08)'},
-    gold200:{name:'GOLD 200',brand:'KODAK',iso:'200',color:'#e2b128',color2:'#b51d22',filter:'saturate(1.08) contrast(1.02) sepia(.16) brightness(1.03)'},
-    trix400:{name:'TRI-X 400',brand:'KODAK',iso:'400',color:'#171717',color2:'#d5a925',filter:'grayscale(1) contrast(1.18) brightness(.97)'},
-    cinestill800t:{name:'800T',brand:'CINESTILL',iso:'800',color:'#1d2d4b',color2:'#bd2634',filter:'saturate(.92) contrast(1.11) hue-rotate(5deg)'},
-    ektar100:{name:'EKTAR 100',brand:'KODAK',iso:'100',color:'#7c1d2c',color2:'#d5a35b',filter:'saturate(1.2) contrast(1.09) brightness(.99)'},
+    portra400: { name: 'PORTRA 400', brand: 'KODAK', iso: '400', color: '#315747', color2: '#e6c16f', kind: 'COLOR NEGATIVE', filter: 'saturate(.9) contrast(.97) brightness(1.03) sepia(.06)' },
+    gold200: { name: 'GOLD 200', brand: 'KODAK', iso: '200', color: '#d4a51e', color2: '#ba2727', kind: 'COLOR NEGATIVE', filter: 'saturate(1.08) contrast(1.03) sepia(.13)' },
+    ektar100: { name: 'EKTAR 100', brand: 'KODAK', iso: '100', color: '#861f2f', color2: '#ddb25f', kind: 'COLOR NEGATIVE', filter: 'saturate(1.2) contrast(1.08)' },
+    velvia50: { name: 'VELVIA 50', brand: 'FUJIFILM', iso: '50', color: '#158364', color2: '#ec3045', kind: 'COLOR REVERSAL', filter: 'saturate(1.25) contrast(1.09) brightness(.98) hue-rotate(-2deg)' },
+    pro400h: { name: 'PRO 400H', brand: 'FUJIFILM', iso: '400', color: '#2b9a83', color2: '#f2e8ca', kind: 'COLOR NEGATIVE', filter: 'saturate(.84) contrast(.94) brightness(1.05) hue-rotate(-3deg)' },
+    cinestill800t: { name: '800T', brand: 'CINESTILL', iso: '800', color: '#243552', color2: '#c92d3b', kind: 'COLOR NEGATIVE', filter: 'saturate(.94) contrast(1.1) hue-rotate(5deg)' },
+    trix400: { name: 'TRI-X 400', brand: 'KODAK', iso: '400', color: '#1a1916', color2: '#d5a828', kind: 'BLACK & WHITE', filter: 'grayscale(1) contrast(1.18) brightness(.98)' },
+    hp5: { name: 'HP5 PLUS', brand: 'ILFORD', iso: '400', color: '#202020', color2: '#e8e7df', kind: 'BLACK & WHITE', filter: 'grayscale(1) contrast(1.1) brightness(1.01)' },
   };
-  const META_KEY='filmalbum-rolls-v1', LOOK_KEY='filmalbum-look-v1', DB='filmalbum-media-v1';
-  const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-  const uid=()=>`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
-  let rolls=loadJson(META_KEY,[]), activeRollId=rolls[0]?.id||null, activeFrame=0, urls=new Map(), dragX=null, viewerIndex=0;
-  let look={stock:'velvia50',intensity:72,grain:28,halation:18,vignette:12,developMode:true,videoSound:false,...loadJson(LOOK_KEY,{})};
+  const STATUS = { shooting: '拍摄中', exposed: '已拍完', developing: '显影中', developed: '已显影', scanned: '已扫描', archived: '已归档' };
+  const DEFAULT_EDIT = { exposure: 0, contrast: 0, saturation: 0, temperature: 0, fade: 0, grain: 24, halation: 12, vignette: 10 };
+  const ADJUSTMENTS = [
+    ['exposure', '曝光', -100, 100, 0], ['contrast', '对比度', -100, 100, 0], ['saturation', '饱和度', -100, 100, 0],
+    ['temperature', '色温', -100, 100, 0], ['fade', '褪色', 0, 100, 0], ['grain', '银盐颗粒', 0, 100, 24],
+    ['halation', '高光晕染', 0, 100, 12], ['vignette', '暗角', 0, 100, 10],
+  ];
+  const META_KEY = 'filmalbum-rolls-v1';
+  const SETTINGS_KEY = 'filmalbum-settings-v2';
+  const DB_NAME = 'filmalbum-media-v1';
+  const $ = selector => document.querySelector(selector);
+  const $$ = selector => [...document.querySelectorAll(selector)];
+  const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+  const clone = value => JSON.parse(JSON.stringify(value));
+
+  let rolls = migrateRolls(loadJson(META_KEY, []));
+  let settings = { developMode: true, ...loadJson(SETTINGS_KEY, {}) };
+  let activeRollId = rolls[0]?.id || null;
+  let activeFrame = 0;
+  let currentView = 'film';
+  let inspectorView = 'look';
+  let rollFilter = 'all';
+  let frameFilter = 'all';
+  let selection = new Set();
+  let selectionAnchor = null;
+  let urls = new Map();
   let dbPromise;
+  let clipboardEdit = null;
+  let undoStack = [];
+  let redoStack = [];
+  let pendingSnapshot = null;
+  let renderVersion = 0;
 
-  function loadJson(key,fallback){try{return JSON.parse(localStorage.getItem(key))||fallback}catch{return fallback}}
-  function saveMeta(){localStorage.setItem(META_KEY,JSON.stringify(rolls));localStorage.setItem(LOOK_KEY,JSON.stringify(look))}
-  function activeRoll(){return rolls.find(r=>r.id===activeRollId)||rolls[0]||null}
-  function toast(message){const el=$('#toast');el.textContent=message;el.classList.add('show');clearTimeout(el._timer);el._timer=setTimeout(()=>el.classList.remove('show'),2200)}
-  function db(){return dbPromise ||= new Promise((resolve,reject)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>r.result.createObjectStore('media');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
-  async function dbPut(id,blob){const d=await db();return new Promise((res,rej)=>{const t=d.transaction('media','readwrite');t.objectStore('media').put(blob,id);t.oncomplete=res;t.onerror=()=>rej(t.error)})}
-  async function dbGet(id){const d=await db();return new Promise((res,rej)=>{const r=d.transaction('media').objectStore('media').get(id);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
-  async function dbDelete(id){const d=await db();return new Promise((res,rej)=>{const t=d.transaction('media','readwrite');t.objectStore('media').delete(id);t.oncomplete=res;t.onerror=()=>rej(t.error)})}
-  async function mediaUrl(frame){if(urls.has(frame.id))return urls.get(frame.id);const blob=await dbGet(frame.id);if(!blob)return '';const url=URL.createObjectURL(blob);urls.set(frame.id,url);return url}
-  function fillStockSelects(){for(const id of ['stock-select','new-roll-stock']){const s=$(`#${id}`);s.innerHTML=Object.entries(STOCKS).map(([k,v])=>`<option value="${k}">${v.brand} · ${v.name}</option>`).join('')}$('#stock-select').value=look.stock;$('#new-roll-stock').value='velvia50'}
-  function createRoll(name='未命名胶卷',stock='velvia50'){const r={id:uid(),name,stock,createdAt:Date.now(),frames:[]};rolls.unshift(r);activeRollId=r.id;activeFrame=0;look.stock=stock;saveMeta();render();return r}
-  function lookCss(stockId=look.stock){const base=STOCKS[stockId]?.filter||'none';const amount=look.intensity/100;return `${base} opacity(${.35+.65*amount})`}
-  function applyLookVariables(root=document.documentElement){root.style.setProperty('--look',lookCss());root.style.setProperty('--grain',String(look.grain/260));root.style.setProperty('--halo',String(look.halation/170));saveMeta()}
-  async function addFiles(fileList){let roll=activeRoll()||createRoll('第一卷',look.stock);const files=[...fileList].filter(f=>f.type.startsWith('image/')||f.type.startsWith('video/'));if(!files.length)return toast('没有检测到照片或视频');for(const file of files){const frame={id:uid(),name:file.name,type:file.type.startsWith('video/')?'video':'image',developed:!look.developMode,createdAt:Date.now()};await dbPut(frame.id,file);roll.frames.push(frame)}saveMeta();activeFrame=Math.max(0,roll.frames.length-files.length);await render();toast(`已装入 ${files.length} 格影像`)}
-  async function render(){renderRolls();await renderStage();renderLab()}
-  function renderRolls(){const list=$('#roll-list');list.innerHTML=rolls.map(r=>{const s=STOCKS[r.stock]||STOCKS.velvia50;return `<button class="roll-card ${r.id===activeRollId?'active':''}" data-roll="${r.id}"><span class="mini-cassette" style="--stock:${s.color}"></span><span><strong>${escapeHtml(r.name)}</strong><small>${s.name} · ${r.frames.length} 格</small></span><em>${new Date(r.createdAt).toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'})}</em></button>`}).join('')||'<p style="font-size:12px;color:var(--muted)">还没有胶卷，点击右上角 ＋ 创建。</p>';list.querySelectorAll('[data-roll]').forEach(b=>b.onclick=()=>{activeRollId=b.dataset.roll;activeFrame=0;look.stock=activeRoll().stock;render()})}
-  async function renderStage(){const r=activeRoll(),empty=!r||!r.frames.length;$('#empty-state').hidden=!empty;$('#film-viewport').hidden=empty;$('#roll-title').textContent=r?.name||'未命名胶卷';const stock=STOCKS[r?.stock||look.stock];$('#roll-stock-label').textContent=`${stock.brand} · ${stock.name}`;updateCanister(stock);$('#total-count').textContent=String(r?.frames.length||0).padStart(2,'0');$('#current-index').textContent=String(empty?0:activeFrame+1).padStart(2,'0');if(empty)return;activeFrame=Math.max(0,Math.min(activeFrame,r.frames.length-1));const items=await Promise.all(r.frames.map(async(f,i)=>{const src=await mediaUrl(f);const tag=f.type==='video'?`<video src="${src}" muted preload="metadata"></video>`:`<img src="${src}" alt="${escapeHtml(f.name)}">`;return `<button class="film-frame ${i===activeFrame?'active':''} ${f.developed?'':'undeveloped'}" data-frame="${i}" style="--look:${lookCss(r.stock)};--grain:${look.grain/260};--halo:${look.halation/170}">${tag}${f.type==='video'?'<span class="media-badge">▶ VIDEO</span>':''}<span class="frame-no">${String(i+1).padStart(2,'0')}A</span></button>`}));$('#film-strip').innerHTML=items.join('');$('#film-strip').style.setProperty('--pull',`${-2-(100-Number($('#pull-range').value))*.08}%`);$$('[data-frame]').forEach(b=>b.onclick=()=>openViewer(Number(b.dataset.frame)));requestAnimationFrame(()=>$('#film-strip .active')?.scrollIntoView({behavior:'smooth',inline:'center',block:'nearest'}))}
-  function updateCanister(s){const c=$('#canister');c.style.setProperty('--stock',s.color);c.style.setProperty('--stock2',s.color2);$('#cassette-brand').textContent=s.brand;$('#cassette-name').textContent=s.name.replace(/\s?\d+T?$/,'');$('#cassette-iso').textContent=s.iso}
-  function renderLab(){$('#stock-select').value=look.stock;for(const key of ['intensity','grain','halation','vignette']){$(`#${key}`).value=look[key];$(`#${key}-value`).textContent=look[key]}$('#develop-mode').checked=look.developMode;$('#video-sound').checked=look.videoSound;$('#stock-swatches').innerHTML=Object.entries(STOCKS).map(([k,v])=>`<button class="stock-swatch ${k===look.stock?'active':''}" data-stock="${k}" title="${v.name}" style="--stock:${v.color}"></button>`).join('');$$('[data-stock]').forEach(b=>b.onclick=()=>setStock(b.dataset.stock))}
-  function setStock(id){look.stock=id;const r=activeRoll();if(r)r.stock=id;applyLookVariables();render()}
-  async function openViewer(index){const r=activeRoll();if(!r?.frames[index])return;viewerIndex=index;const f=r.frames[index],src=await mediaUrl(f);const media=f.type==='video'?`<video src="${src}" controls ${look.videoSound?'':'muted'} autoplay playsinline></video>`:`<img src="${src}" alt="${escapeHtml(f.name)}">`;$('#viewer-media').innerHTML=media;$('#viewer-media').classList.toggle('undeveloped',!f.developed);$('#viewer-media').style.setProperty('--look',lookCss(r.stock));$('#viewer-media').style.setProperty('--grain',String(look.grain/240));$('#viewer-media').style.setProperty('--halo',String(look.halation/160));$('#viewer').hidden=false;$('#viewer-roll').textContent=`${STOCKS[r.stock].name} · ${r.name}`;$('#viewer-number').textContent=`${String(index+1).padStart(2,'0')} / ${String(r.frames.length).padStart(2,'0')}`;$('#viewer-caption').textContent=f.name;$('#btn-develop').hidden=f.developed;document.body.style.overflow='hidden'}
-  function closeViewer(){$('#viewer').hidden=true;$('#viewer-media').innerHTML='';document.body.style.overflow=''}
-  async function stepFrame(delta,inViewer=false){const r=activeRoll();if(!r?.frames.length)return;const current=inViewer?viewerIndex:activeFrame;const next=(current+delta+r.frames.length)%r.frames.length;if(inViewer)await openViewer(next);else{activeFrame=next;await renderStage()}}
-  async function deleteFrame(){const r=activeRoll(),f=r?.frames[viewerIndex];if(!f)return;await dbDelete(f.id);if(urls.has(f.id)){URL.revokeObjectURL(urls.get(f.id));urls.delete(f.id)}r.frames.splice(viewerIndex,1);saveMeta();closeViewer();activeFrame=Math.min(viewerIndex,Math.max(0,r.frames.length-1));render();toast('已移除此格')}
-  async function loadDemo(){const r=createRoll('海边散步', 'velvia50');const colors=[['#263a40','#e1b47a'],['#203448','#8da6b0'],['#5b3236','#cf9b65'],['#334e3c','#d6c5a4'],['#373039','#948cbd'],['#263a4e','#c9a05a']];for(let i=0;i<6;i++){const [a,b]=colors[i];const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><circle cx="${220+i*135}" cy="${180+i%2*220}" r="${90+i*18}" fill="#fff" opacity=".2"/><path d="M0 ${560-i*24} Q300 ${390+i*10} 620 ${570-i*30} T1200 510 V800 H0Z" fill="#111" opacity=".35"/><text x="70" y="735" fill="white" opacity=".82" font-family="serif" font-size="38">FRAME ${String(i+1).padStart(2,'0')} · FILM ALBUM</text></svg>`;const id=uid();await dbPut(id,new Blob([svg],{type:'image/svg+xml'}));r.frames.push({id,name:`演示影像 ${i+1}`,type:'image',developed:i<2,createdAt:Date.now()})}saveMeta();render();toast('演示胶卷已装入')}
-  function exportManifest(){const data={format:'filmalbum-catalog',version:1,exportedAt:new Date().toISOString(),rolls,look};const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download=`filmalbum-catalog-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
-  function escapeHtml(s=''){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+  function loadJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; } }
+  function migrateRolls(items) {
+    return items.map(roll => ({
+      format: '135', status: 'shooting', camera: '', lens: '', location: '', date: '', process: '', notes: '',
+      ...roll,
+      frames: (roll.frames || []).map(frame => ({ rating: 0, flagged: false, color: '', tags: [], edit: { ...DEFAULT_EDIT }, ...frame, edit: { ...DEFAULT_EDIT, ...(frame.edit || {}) } })),
+    }));
+  }
+  function save() { localStorage.setItem(META_KEY, JSON.stringify(rolls)); localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
+  function activeRoll() { return rolls.find(roll => roll.id === activeRollId) || rolls[0] || null; }
+  function activeItem() { return activeRoll()?.frames[activeFrame] || null; }
+  function snapshot() { return { rolls: clone(rolls), activeRollId, activeFrame }; }
+  function restore(state) { rolls = state.rolls; activeRollId = state.activeRollId; activeFrame = state.activeFrame; selection.clear(); save(); renderAll(); }
+  function checkpoint() { undoStack.push(snapshot()); if (undoStack.length > 40) undoStack.shift(); redoStack = []; updateHistoryButtons(); }
+  function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); restore(undoStack.pop()); updateHistoryButtons(); toast('已撤销'); }
+  function redo() { if (!redoStack.length) return; undoStack.push(snapshot()); restore(redoStack.pop()); updateHistoryButtons(); toast('已重做'); }
+  function updateHistoryButtons() { $('#btn-undo').disabled = !undoStack.length; $('#btn-redo').disabled = !redoStack.length; }
+  function beginContinuousEdit() { if (!pendingSnapshot) pendingSnapshot = snapshot(); }
+  function finishContinuousEdit() { if (!pendingSnapshot) return; undoStack.push(pendingSnapshot); if (undoStack.length > 40) undoStack.shift(); pendingSnapshot = null; redoStack = []; save(); updateHistoryButtons(); }
 
-  function bind(){fillStockSelects();$('#btn-import').onclick=$('#btn-empty-import').onclick=()=>$('#file-input').click();$('#file-input').onchange=e=>{addFiles(e.target.files);e.target.value=''};$('#btn-new-roll').onclick=()=>$('#new-roll-dialog').showModal();$('#new-roll-form').addEventListener('submit',e=>{if(e.submitter?.value==='cancel')return;createRoll($('#new-roll-name').value.trim()||'未命名胶卷',$('#new-roll-stock').value);toast('新胶卷已创建')});$('#btn-demo').onclick=loadDemo;$('#btn-delete-roll').onclick=async()=>{const r=activeRoll();if(!r)return;if(!confirm(`删除胶卷“${r.name}”及其中 ${r.frames.length} 格影像？`))return;for(const f of r.frames)await dbDelete(f.id);rolls=rolls.filter(x=>x.id!==r.id);activeRollId=rolls[0]?.id||null;saveMeta();render()};$('#stock-select').onchange=e=>setStock(e.target.value);for(const key of ['intensity','grain','halation','vignette'])$(`#${key}`).oninput=e=>{look[key]=Number(e.target.value);$(`#${key}-value`).textContent=look[key];applyLookVariables();renderStage();if(!$('#viewer').hidden)openViewer(viewerIndex)};$('#develop-mode').onchange=e=>{look.developMode=e.target.checked;saveMeta()};$('#video-sound').onchange=e=>{look.videoSound=e.target.checked;saveMeta()};$('#pull-range').oninput=e=>$('#film-strip').style.setProperty('--pull',`${-2-(100-Number(e.target.value))*.08}%`);$('#btn-prev').onclick=()=>stepFrame(-1);$('#btn-next').onclick=()=>stepFrame(1);$('#btn-shuffle').onclick=()=>{const r=activeRoll();if(!r?.frames.length)return;openViewer(Math.floor(Math.random()*r.frames.length))};$('#viewer-close').onclick=closeViewer;$('#viewer-prev').onclick=()=>stepFrame(-1,true);$('#viewer-next').onclick=()=>stepFrame(1,true);$('#btn-develop').onclick=()=>{const f=activeRoll()?.frames[viewerIndex];if(!f)return;f.developed=true;saveMeta();$('#viewer-media').classList.remove('undeveloped');$('#btn-develop').hidden=true;renderStage();toast('显影完成')};$('#btn-delete-frame').onclick=deleteFrame;$('#btn-export-manifest').onclick=exportManifest;$('#btn-reset-look').onclick=()=>{look={...look,intensity:72,grain:28,halation:18,vignette:12};applyLookVariables();render()};$('#btn-theme').onclick=()=>{const next=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=next;localStorage.setItem('filmalbum-theme',next)};$('#btn-fullscreen').onclick=()=>document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();document.documentElement.dataset.theme=localStorage.getItem('filmalbum-theme')||'light';$('#drop-zone').ondragover=e=>{e.preventDefault();e.currentTarget.classList.add('drag-over')};$('#drop-zone').ondragleave=e=>{if(!e.currentTarget.contains(e.relatedTarget))e.currentTarget.classList.remove('drag-over')};$('#drop-zone').ondrop=e=>{e.preventDefault();e.currentTarget.classList.remove('drag-over');addFiles(e.dataTransfer.files)};$('#film-strip').onpointerdown=e=>{dragX=e.clientX;$('#film-strip').classList.add('dragging');$('#film-strip').setPointerCapture(e.pointerId)};$('#film-strip').onpointermove=e=>{if(dragX==null)return;const dx=e.clientX-dragX;dragX=e.clientX;$('#film-viewport').scrollLeft-=dx};$('#film-strip').onpointerup=$('#film-strip').onpointercancel=()=>{dragX=null;$('#film-strip').classList.remove('dragging')};document.addEventListener('keydown',e=>{if(e.key==='Escape')closeViewer();if(e.key==='ArrowLeft')stepFrame(-1,!$('#viewer').hidden);if(e.key==='ArrowRight')stepFrame(1,!$('#viewer').hidden)});$$('[data-mobile]').forEach(b=>b.onclick=()=>{$$('[data-mobile]').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('.library-panel').classList.toggle('mobile-show',b.dataset.mobile==='library');$('.lab-panel').classList.toggle('mobile-show',b.dataset.mobile==='lab')})}
-  bind();
-  // Frame clicks must not start the strip's pointer-capture drag gesture.
-  $('#film-strip').addEventListener('pointerdown', event => {
-    if (event.target.closest('.film-frame')) event.stopImmediatePropagation();
-  }, true);
-  applyLookVariables();render();
+  function db() {
+    return dbPromise ||= new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('media');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  async function dbPut(id, blob) { const database = await db(); return transactionPromise(database, 'readwrite', store => store.put(blob, id)); }
+  async function dbGet(id) { const database = await db(); return new Promise((resolve, reject) => { const request = database.transaction('media').objectStore('media').get(id); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
+  async function dbDelete(id) { const database = await db(); return transactionPromise(database, 'readwrite', store => store.delete(id)); }
+  function transactionPromise(database, mode, action) { return new Promise((resolve, reject) => { const transaction = database.transaction('media', mode); action(transaction.objectStore('media')); transaction.oncomplete = resolve; transaction.onerror = () => reject(transaction.error); }); }
+  async function mediaUrl(frame) { if (urls.has(frame.id)) return urls.get(frame.id); const blob = await dbGet(frame.id); if (!blob) return ''; const url = URL.createObjectURL(blob); urls.set(frame.id, url); return url; }
+  function revokeUrl(id) { if (!urls.has(id)) return; URL.revokeObjectURL(urls.get(id)); urls.delete(id); }
+  function decodeImageBlob(blob) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob); const image = new Image();
+      image.onload = () => resolve({ image, width: image.naturalWidth, height: image.naturalHeight, dispose: () => URL.revokeObjectURL(url) });
+      image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片解码失败')); };
+      image.src = url;
+    });
+  }
+
+  function escapeHtml(value = '') { return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char])); }
+  function frameEdit(frame) { return { ...DEFAULT_EDIT, ...(frame?.edit || {}) }; }
+  function frameFilterCss(frame, stockId) {
+    const edit = frameEdit(frame);
+    const stock = STOCKS[stockId] || STOCKS.portra400;
+    const brightness = Math.max(.2, 1 + edit.exposure / 130);
+    const contrast = Math.max(.2, 1 + edit.contrast / 100);
+    const saturation = Math.max(0, 1 + edit.saturation / 100);
+    const sepia = Math.max(0, edit.temperature) / 500;
+    const hue = edit.temperature * -.035;
+    const fade = edit.fade / 380;
+    return `${stock.filter} brightness(${brightness}) contrast(${contrast}) saturate(${saturation}) sepia(${sepia}) hue-rotate(${hue}deg) opacity(${1 - fade})`;
+  }
+  function frameStyle(frame, stockId) {
+    const edit = frameEdit(frame);
+    return `--frame-filter:${frameFilterCss(frame, stockId)};--grain:${edit.grain / 230};--vignette:${edit.vignette / 120};--halo:${edit.halation / 100}`;
+  }
+  function toast(message, type = 'success') {
+    const node = document.createElement('div'); node.className = `toast ${type}`; node.textContent = message; $('#toast-stack').append(node);
+    setTimeout(() => node.remove(), 2600);
+  }
+  function downloadBlob(blob, name) { const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1500); }
+  function currentStock() { return STOCKS[activeRoll()?.stock] || STOCKS.portra400; }
+
+  function createRoll({ name = '未命名胶卷', stock = 'portra400', format = '135', camera = '' } = {}) {
+    const roll = { id: uid(), name, stock, format, camera, lens: '', location: '', date: '', process: '', notes: '', status: 'shooting', createdAt: Date.now(), frames: [] };
+    rolls.unshift(roll); activeRollId = roll.id; activeFrame = 0; selection.clear(); save(); renderAll(); return roll;
+  }
+  async function addFiles(fileList) {
+    const files = [...fileList].filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'));
+    if (!files.length) return toast('未检测到可用的照片或视频', 'warning');
+    if (!activeRoll()) createRoll({ name: '第一卷' });
+    checkpoint();
+    const roll = activeRoll();
+    for (const file of files) {
+      const frame = { id: uid(), name: file.name, type: file.type.startsWith('video/') ? 'video' : 'image', developed: !settings.developMode, createdAt: Date.now(), rating: 0, flagged: false, color: '', tags: [], edit: { ...DEFAULT_EDIT } };
+      await dbPut(frame.id, file); roll.frames.push(frame);
+    }
+    activeFrame = Math.max(0, roll.frames.length - files.length); save(); await renderAll(); toast(`已装入 ${files.length} 格影像`);
+  }
+
+  async function renderAll() {
+    const version = ++renderVersion;
+    renderRollList(); renderContext(); renderInspector(); renderSelectionState();
+    if (currentView === 'film') await renderFilm(version);
+    if (currentView === 'contact') await renderContact(version);
+    if (currentView === 'develop') await renderDevelop(version);
+    updateHistoryButtons();
+  }
+  function renderRollList() {
+    const query = $('#roll-search').value.trim().toLowerCase();
+    const items = rolls.filter(roll => {
+      const matchesFilter = rollFilter === 'all' || (rollFilter === 'developed' ? ['developed', 'scanned', 'archived'].includes(roll.status) : roll.status === rollFilter);
+      const haystack = `${roll.name} ${roll.camera} ${roll.location} ${STOCKS[roll.stock]?.name || ''}`.toLowerCase();
+      return matchesFilter && (!query || haystack.includes(query));
+    });
+    $('#roll-list').innerHTML = items.map(roll => {
+      const stock = STOCKS[roll.stock] || STOCKS.portra400;
+      return `<button class="roll-card ${roll.id === activeRollId ? 'active' : ''}" data-roll="${roll.id}"><span class="mini-roll" style="--stock:${stock.color};--stock2:${stock.color2}"><i></i></span><span><strong>${escapeHtml(roll.name)}</strong><small>${stock.name} · ${roll.frames.length} 格 · ${STATUS[roll.status]}</small></span><em>${new Date(roll.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })}</em></button>`;
+    }).join('') || '<div class="empty-list">没有匹配的胶卷</div>';
+    $('#storage-count').textContent = rolls.length;
+    $('#storage-bar').style.width = `${Math.min(100, 8 + rolls.reduce((sum, roll) => sum + roll.frames.length, 0) * 1.5)}%`;
+  }
+  function renderContext() {
+    const roll = activeRoll(); const stock = currentStock();
+    $('#context-title').textContent = roll?.name || '未命名胶卷';
+    $('#context-kicker').textContent = roll ? `${roll.format} · ${stock.kind}` : '135 · COLOR NEGATIVE';
+    $('#context-status').style.background = roll?.status === 'archived' ? '#888' : roll?.status === 'developed' ? '#c88945' : '#6caa74';
+  }
+  async function renderFilm(version) {
+    const roll = activeRoll(); const empty = !roll?.frames.length;
+    $('#empty-state').hidden = !empty; $('#film-rail').hidden = empty;
+    $('#total-count').textContent = String(roll?.frames.length || 0).padStart(2, '0');
+    if (empty) { $('#current-index').textContent = '00'; return; }
+    activeFrame = Math.max(0, Math.min(activeFrame, roll.frames.length - 1));
+    $('#current-index').textContent = String(activeFrame + 1).padStart(2, '0');
+    const cards = await Promise.all(roll.frames.map(async (frame, index) => {
+      const src = await mediaUrl(frame); const media = frame.type === 'video' ? `<video src="${src}" muted preload="metadata"></video>` : `<img src="${src}" alt="${escapeHtml(frame.name)}">`;
+      const badges = `${frame.rating ? `<b title="${frame.rating} 星">★${frame.rating}</b>` : ''}${frame.flagged ? '<b title="待处理">!</b>' : ''}`;
+      return `<button class="film-frame ${index === activeFrame ? 'active' : ''} ${frame.developed ? '' : 'undeveloped'}" data-frame="${index}" style="${frameStyle(frame, roll.stock)}">${media}<span class="frame-badges">${badges}</span><span class="frame-no">${String(index + 1).padStart(2, '0')}A</span></button>`;
+    }));
+    if (version !== renderVersion) return;
+    $('#film-strip').innerHTML = cards.join(''); updateCanister();
+    requestAnimationFrame(() => $('#film-strip .active')?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }));
+  }
+  async function renderContact(version) {
+    const roll = activeRoll(); if (!roll?.frames.length) { $('#contact-grid').innerHTML = '<div class="empty-grid">当前胶卷没有影像</div>'; return; }
+    const visible = roll.frames.map((frame, index) => ({ frame, index })).filter(({ frame }) => frameFilter === 'all' || (frameFilter === 'favorites' && frame.rating >= 4) || (frameFilter === 'unrated' && !frame.rating) || (frameFilter === 'flagged' && frame.flagged));
+    const cards = await Promise.all(visible.map(async ({ frame, index }) => {
+      const src = await mediaUrl(frame); const media = frame.type === 'video' ? `<video src="${src}" muted preload="metadata"></video>` : `<img src="${src}" alt="${escapeHtml(frame.name)}">`;
+      return `<button class="contact-card ${selection.has(frame.id) ? 'selected' : ''} ${frame.developed ? '' : 'undeveloped'}" data-contact-frame="${index}" style="${frameStyle(frame, roll.stock)}"><span class="contact-thumb">${media}</span>${frame.analysis ? `<span class="contact-score">${frame.analysis.score}</span>` : ''}<span class="contact-meta"><span>${String(index + 1).padStart(2, '0')}A</span><b>${frame.rating ? '★'.repeat(frame.rating) : 'UNRATED'}</b></span></button>`;
+    }));
+    if (version !== renderVersion) return; $('#contact-grid').innerHTML = cards.join('');
+  }
+  async function renderDevelop(version) {
+    const roll = activeRoll(); const frame = activeItem(); const placeholder = $('#develop-placeholder'); const media = $('#develop-media');
+    if (!roll || !frame) { placeholder.hidden = false; media.hidden = true; $('#develop-name').textContent = '—'; renderRating(); return; }
+    const src = await mediaUrl(frame); if (version !== renderVersion) return;
+    placeholder.hidden = true; media.hidden = false; media.className = `develop-media ${frame.developed ? '' : 'undeveloped'}`; media.style.cssText = frameStyle(frame, roll.stock);
+    media.innerHTML = frame.type === 'video' ? `<video src="${src}" controls playsinline></video>` : `<img src="${src}" alt="${escapeHtml(frame.name)}">`;
+    if (!frame.developed) media.insertAdjacentHTML('beforeend', '<button class="reveal-btn" id="btn-reveal-frame">✦ 点击显影</button>');
+    $('#develop-name').textContent = `${String(activeFrame + 1).padStart(2, '0')}A · ${frame.name}`; renderRating();
+  }
+  function renderRating() {
+    const rating = activeItem()?.rating || 0;
+    $('#develop-rating').innerHTML = [1, 2, 3, 4, 5].map(value => `<button data-rating="${value}" class="${value <= rating ? 'active' : ''}" aria-label="${value} 星">★</button>`).join('');
+  }
+  function updateCanister() {
+    const stock = currentStock(); const canister = $('#canister');
+    canister.style.setProperty('--stock', stock.color); canister.style.setProperty('--stock2', stock.color2);
+    $('#cassette-brand').textContent = stock.brand; $('#cassette-name').textContent = stock.name.replace(/\s?\d+T?$/, ''); $('#cassette-iso').textContent = stock.iso;
+  }
+  function renderInspector() {
+    const roll = activeRoll(); const frame = activeItem();
+    $('#stock-picker').innerHTML = Object.entries(STOCKS).map(([id, stock]) => `<button class="stock-card ${roll?.stock === id ? 'active' : ''}" data-stock="${id}" style="--stock:${stock.color}"><i></i><b>${stock.name}</b><small>${stock.brand}</small></button>`).join('');
+    const edit = frameEdit(frame);
+    $('#adjustment-list').innerHTML = ADJUSTMENTS.map(([key, label, min, max]) => `<div class="adjustment"><div><label for="adj-${key}">${label}</label><output id="out-${key}">${formatAdjustment(key, edit[key])}</output></div><input id="adj-${key}" data-adjustment="${key}" type="range" min="${min}" max="${max}" value="${edit[key]}" ${frame ? '' : 'disabled'}></div>`).join('');
+    $('#develop-mode').checked = settings.developMode;
+    for (const [id, key] of [['meta-name', 'name'], ['meta-format', 'format'], ['meta-status', 'status'], ['meta-camera', 'camera'], ['meta-lens', 'lens'], ['meta-location', 'location'], ['meta-date', 'date'], ['meta-process', 'process'], ['meta-notes', 'notes']]) $('#'+id).value = roll?.[key] || '';
+    renderAnalysisSummary();
+  }
+  function formatAdjustment(key, value) { if (['grain', 'halation', 'vignette', 'fade'].includes(key)) return `${value}%`; return value > 0 ? `+${value}` : String(value); }
+  function renderSelectionState() { $('#selection-summary').hidden = !selection.size; $('#selection-count').textContent = selection.size; }
+  function renderAnalysisSummary() {
+    const frames = activeRoll()?.frames || []; const analyzed = frames.filter(frame => frame.analysis);
+    if (!analyzed.length) { $('#analysis-summary').innerHTML = '<p class="empty-analysis">尚未分析当前胶卷</p>'; return; }
+    const best = analyzed.filter(frame => frame.analysis.score >= 80).length; const issues = analyzed.filter(frame => frame.analysis.score < 48).length; const duplicates = analyzed.filter(frame => frame.analysis.duplicateOf).length;
+    $('#analysis-summary').innerHTML = `<div class="analysis-stat"><span>推荐精选</span><b>${best}</b></div><div class="analysis-stat"><span>可能需要检查</span><b>${issues}</b></div><div class="analysis-stat"><span>相似画面</span><b>${duplicates}</b></div>`;
+  }
+
+  function switchView(view) {
+    currentView = view; $$('.view').forEach(node => node.classList.toggle('active', node.id === `${view}-view`)); $$('[data-view]').forEach(button => button.classList.toggle('active', button.dataset.view === view)); $$('[data-mobile-view]').forEach(button => button.classList.toggle('active', button.dataset.mobileView === view)); renderAll();
+  }
+  function switchInspector(view) { inspectorView = view; $$('.inspector-section').forEach(node => node.classList.toggle('active', node.id === `inspector-${view}`)); $$('[data-inspector]').forEach(button => button.classList.toggle('active', button.dataset.inspector === view)); }
+  function selectFrame(index, event = {}) {
+    const roll = activeRoll(); if (!roll?.frames[index]) return; const frame = roll.frames[index];
+    if (event.shiftKey && selectionAnchor !== null) { const start = Math.min(selectionAnchor, index); const end = Math.max(selectionAnchor, index); for (let i = start; i <= end; i++) selection.add(roll.frames[i].id); }
+    else if (event.metaKey || event.ctrlKey) { selection.has(frame.id) ? selection.delete(frame.id) : selection.add(frame.id); selectionAnchor = index; }
+    else { selection.clear(); selection.add(frame.id); selectionAnchor = index; }
+    activeFrame = index; renderSelectionState(); renderAll();
+  }
+  function stepFrame(delta) { const frames = activeRoll()?.frames || []; if (!frames.length) return; activeFrame = (activeFrame + delta + frames.length) % frames.length; renderAll(); }
+  function setRating(value) { const frame = activeItem(); if (!frame) return; checkpoint(); frame.rating = frame.rating === value ? 0 : value; save(); renderAll(); }
+  function setStock(id) { const roll = activeRoll(); if (!roll || roll.stock === id) return; checkpoint(); roll.stock = id; save(); renderAll(); }
+  function editSelectedFrames(mutator) { const roll = activeRoll(); if (!roll) return 0; const targets = selection.size ? roll.frames.filter(frame => selection.has(frame.id)) : [activeItem()].filter(Boolean); if (!targets.length) return 0; checkpoint(); targets.forEach(mutator); save(); renderAll(); return targets.length; }
+
+  async function exportProject() {
+    if (!rolls.length) return toast('没有可导出的胶卷', 'warning');
+    toast('正在整理完整项目，请稍候'); const media = {};
+    for (const roll of rolls) for (const frame of roll.frames) { const blob = await dbGet(frame.id); if (blob) media[frame.id] = await blobToDataUrl(blob); }
+    const project = { format: 'filmalbum-project', version: 2, exportedAt: new Date().toISOString(), rolls, settings, media };
+    downloadBlob(new Blob([JSON.stringify(project)], { type: 'application/json' }), `FilmAlbum-${new Date().toISOString().slice(0, 10)}.filmalbum`); toast('完整项目已导出');
+  }
+  function exportCatalog() { const data = { format: 'filmalbum-catalog', version: 2, exportedAt: new Date().toISOString(), rolls, settings }; downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `FilmAlbum-catalog-${new Date().toISOString().slice(0, 10)}.json`); }
+  async function exportContactSheet() {
+    const roll = activeRoll(); const frames = roll?.frames.filter(frame => frame.type === 'image') || [];
+    if (!frames.length) return toast('当前胶卷没有可输出的照片', 'warning');
+    toast('正在生成高清接触印样');
+    const columns = frames.length <= 6 ? 3 : 4; const cellW = 430; const cellH = 330; const headerH = 150; const rows = Math.ceil(frames.length / columns);
+    const canvas = document.createElement('canvas'); canvas.width = columns * cellW + 80; canvas.height = rows * cellH + headerH + 50; const context = canvas.getContext('2d');
+    context.fillStyle = '#171714'; context.fillRect(0, 0, canvas.width, canvas.height); context.fillStyle = '#f4f0e5'; context.font = '600 38px Georgia'; context.fillText(roll.name, 40, 58); context.fillStyle = '#a9a398'; context.font = '18px monospace'; context.fillText(`${roll.format}  ·  ${currentStock().brand} ${currentStock().name}  ·  ${frames.length} FRAMES`, 40, 96);
+    for (let index = 0; index < frames.length; index++) {
+      const frame = frames[index]; const blob = await dbGet(frame.id); if (!blob) continue; const decoded = await decodeImageBlob(blob); const column = index % columns; const row = Math.floor(index / columns); const x = 40 + column * cellW; const y = headerH + row * cellH; const drawW = cellW - 24; const drawH = cellH - 58; const scale = Math.max(drawW / decoded.width, drawH / decoded.height); const sourceW = drawW / scale; const sourceH = drawH / scale; const sourceX = (decoded.width - sourceW) / 2; const sourceY = (decoded.height - sourceH) / 2;
+      context.save(); context.filter = frameFilterCss(frame, roll.stock); context.drawImage(decoded.image, sourceX, sourceY, sourceW, sourceH, x, y, drawW, drawH); context.restore(); decoded.dispose(); context.fillStyle = '#d6cebc'; context.font = '15px monospace'; context.fillText(`${String(index + 1).padStart(2, '0')}A`, x, y + drawH + 25); if (frame.rating) { context.fillStyle = '#e3b849'; context.fillText('★'.repeat(frame.rating), x + 55, y + drawH + 25); }
+    }
+    canvas.toBlob(blob => { downloadBlob(blob, `${roll.name}-接触印样.jpg`); toast('接触印样已导出'); }, 'image/jpeg', .94);
+  }
+  async function importProject(file) {
+    let project; try { project = JSON.parse(await file.text()); } catch { return toast('无法读取这个项目文件', 'warning'); }
+    if (project.format !== 'filmalbum-project' || !Array.isArray(project.rolls)) return toast('不是有效的 FilmAlbum 完整项目', 'warning');
+    if (rolls.length && !confirm('导入会替换当前工作区。建议先导出当前项目，是否继续？')) return;
+    toast('正在恢复媒体与编辑记录');
+    for (const [id, dataUrl] of Object.entries(project.media || {})) await dbPut(id, dataUrlToBlob(dataUrl));
+    rolls = migrateRolls(project.rolls); settings = { developMode: true, ...(project.settings || {}) }; activeRollId = rolls[0]?.id || null; activeFrame = 0; selection.clear(); urls.forEach(url => URL.revokeObjectURL(url)); urls.clear(); save(); await renderAll(); toast(`已恢复 ${rolls.length} 卷胶片`);
+  }
+  function blobToDataUrl(blob) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(blob); }); }
+  function dataUrlToBlob(dataUrl) { const [header, data] = dataUrl.split(','); const mime = header.match(/data:(.*?);/)?.[1] || 'application/octet-stream'; const binary = atob(data); const bytes = new Uint8Array(binary.length); for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i); return new Blob([bytes], { type: mime }); }
+
+  async function analyzeCurrentRoll() {
+    const roll = activeRoll(); if (!roll?.frames.length) return toast('当前胶卷没有照片', 'warning');
+    const photos = roll.frames.filter(frame => frame.type === 'image'); if (!photos.length) return toast('画质分析目前仅支持照片', 'warning');
+    checkpoint(); const progress = $('#analysis-progress'); progress.hidden = false; const hashes = [];
+    try {
+      for (let index = 0; index < photos.length; index++) {
+        const frame = photos[index]; const blob = await dbGet(frame.id); if (blob) { frame.analysis = await analyzeImage(blob); for (const prior of hashes) if (hashDistance(frame.analysis.hash, prior.hash) <= 7) { frame.analysis.duplicateOf = prior.id; break; } hashes.push({ id: frame.id, hash: frame.analysis.hash }); }
+        progress.querySelector('em').style.width = `${((index + 1) / photos.length) * 100}%`; progress.querySelector('span').textContent = `正在分析 ${index + 1} / ${photos.length}`; await new Promise(resolve => requestAnimationFrame(resolve));
+      }
+      save(); renderAll(); switchInspector('selection'); toast('本地画质分析完成');
+    } catch (error) { toast(error.message || '画质分析失败，请检查图片格式', 'warning'); }
+    finally { progress.hidden = true; }
+  }
+  async function analyzeImage(blob) {
+    const decoded = await decodeImageBlob(blob); const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 48; const context = canvas.getContext('2d', { willReadFrequently: true }); context.drawImage(decoded.image, 0, 0, 64, 48); decoded.dispose();
+    const pixels = context.getImageData(0, 0, 64, 48).data; const luminance = new Float32Array(64 * 48); let sum = 0;
+    for (let i = 0, p = 0; i < pixels.length; i += 4, p++) { const value = pixels[i] * .2126 + pixels[i + 1] * .7152 + pixels[i + 2] * .0722; luminance[p] = value; sum += value; }
+    const brightness = sum / luminance.length; let variance = 0; let sharpness = 0;
+    for (let y = 0; y < 48; y++) for (let x = 0; x < 64; x++) { const index = y * 64 + x; variance += (luminance[index] - brightness) ** 2; if (x < 63) sharpness += Math.abs(luminance[index] - luminance[index + 1]); if (y < 47) sharpness += Math.abs(luminance[index] - luminance[index + 64]); }
+    const contrast = Math.sqrt(variance / luminance.length); sharpness /= luminance.length * 2;
+    let score = 100 - Math.min(40, Math.abs(brightness - 128) * .32) + Math.min(12, contrast / 4) + Math.min(14, sharpness / 2.5) - 18; score = Math.round(Math.max(20, Math.min(99, score)));
+    const hashValues = []; for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) hashValues.push(luminance[(y * 6) * 64 + x * 8]); const mean = hashValues.reduce((a, b) => a + b, 0) / 64;
+    return { score, brightness: Math.round(brightness), contrast: Math.round(contrast), sharpness: Math.round(sharpness), hash: hashValues.map(value => value > mean ? '1' : '0').join('') };
+  }
+  function hashDistance(a = '', b = '') { let count = 0; for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) count++; return count; }
+  async function smartSelect() { const roll = activeRoll(); if (!roll) return; if (!roll.frames.some(frame => frame.analysis)) await analyzeCurrentRoll(); selection.clear(); roll.frames.filter(frame => frame.analysis?.score >= 78 && !frame.analysis?.duplicateOf).forEach(frame => selection.add(frame.id)); frameFilter = 'favorites'; renderAll(); toast(`已选出 ${selection.size} 格推荐画面`); }
+
+  async function exportCurrentFrame() {
+    const roll = activeRoll(); const frame = activeItem(); if (!roll || !frame || frame.type !== 'image') return toast('当前帧无法导出为照片', 'warning');
+    const blob = await dbGet(frame.id); const decoded = await decodeImageBlob(blob); const canvas = document.createElement('canvas'); canvas.width = decoded.width; canvas.height = decoded.height; const context = canvas.getContext('2d'); context.filter = frameFilterCss(frame, roll.stock); context.drawImage(decoded.image, 0, 0); decoded.dispose();
+    canvas.toBlob(output => downloadBlob(output, `FilmAlbum-${frame.name.replace(/\.[^.]+$/, '')}.jpg`), 'image/jpeg', .94);
+  }
+  async function loadDemo() {
+    checkpoint(); const roll = createRoll({ name: '东京雨夜 · 36', stock: 'cinestill800t', format: '135', camera: 'Leica M6' }); roll.location = 'Tokyo · Shinjuku'; roll.date = new Date().toISOString().slice(0, 10); roll.status = 'developing';
+    const palettes = [['#071b2a','#ec4c3d'],['#192947','#dd9c50'],['#19201c','#50ad9f'],['#291d35','#bd3f59'],['#0a2630','#e2c07d'],['#231d28','#6894ad'],['#102c34','#d74f42'],['#271e1c','#c6a45c']];
+    for (let index = 0; index < palettes.length; index++) { const [a, b] = palettes[index]; const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="930"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient><filter id="n"><feTurbulence baseFrequency=".8" numOctaves="3" stitchTiles="stitch"/><feBlend mode="soft-light" in="SourceGraphic"/></filter></defs><rect width="1400" height="930" fill="url(#g)"/><g opacity=".75"><circle cx="${220 + index * 126}" cy="${170 + index % 3 * 210}" r="${80 + index * 10}" fill="#ffd58a"/><rect x="${700 - index * 47}" y="120" width="240" height="650" rx="15" fill="#12202a"/><path d="M0 ${650 - index * 12} Q350 ${430 + index * 17} 720 ${690 - index * 22} T1400 590V930H0Z" fill="#070808"/></g><rect width="1400" height="930" filter="url(#n)" opacity=".16"/><text x="60" y="870" font-family="monospace" font-size="30" fill="white" opacity=".7">TOKYO / FRAME ${String(index + 1).padStart(2, '0')}</text></svg>`; const id = uid(); await dbPut(id, new Blob([svg], { type: 'image/svg+xml' })); roll.frames.push({ id, name: `Tokyo-${String(index + 1).padStart(2, '0')}.svg`, type: 'image', developed: index < 3, createdAt: Date.now(), rating: index === 1 ? 5 : index === 4 ? 4 : 0, flagged: index === 6, color: '', tags: [], edit: { ...DEFAULT_EDIT, exposure: index % 2 ? 5 : -3, grain: 30 } }); }
+    save(); await renderAll(); toast('演示胶卷已装入');
+  }
+
+  function bind() {
+    $$('[data-view]').forEach(button => button.onclick = () => switchView(button.dataset.view));
+    $$('[data-inspector]').forEach(button => button.onclick = () => switchInspector(button.dataset.inspector));
+    $('#btn-import').onclick = $('#btn-empty-import').onclick = () => $('#file-input').click();
+    $('#file-input').onchange = event => { addFiles(event.target.files); event.target.value = ''; };
+    $('#btn-new-roll').onclick = () => $('#new-roll-dialog').showModal();
+    $('#new-roll-form').onsubmit = event => { if (event.submitter?.value === 'cancel') return; checkpoint(); createRoll({ name: $('#new-roll-name').value.trim() || '未命名胶卷', stock: $('#new-roll-stock').value, format: $('#new-roll-format').value, camera: $('#new-roll-camera').value.trim() }); toast('新胶卷已创建'); };
+    $('#btn-demo').onclick = $('#btn-empty-demo').onclick = loadDemo;
+    $('#roll-search').oninput = renderRollList;
+    $('#roll-list').onclick = event => { const card = event.target.closest('[data-roll]'); if (!card) return; activeRollId = card.dataset.roll; activeFrame = 0; selection.clear(); renderAll(); };
+    $$('[data-roll-filter]').forEach(button => button.onclick = () => { rollFilter = button.dataset.rollFilter; $$('[data-roll-filter]').forEach(node => node.classList.toggle('active', node === button)); renderRollList(); });
+    $$('[data-frame-filter]').forEach(button => button.onclick = () => { frameFilter = button.dataset.frameFilter; $$('[data-frame-filter]').forEach(node => node.classList.toggle('active', node === button)); renderContact(renderVersion); });
+    $('#grid-size').oninput = event => $('#contact-grid').style.setProperty('--thumb', `${event.target.value}px`);
+    $('#btn-prev').onclick = $('#develop-prev').onclick = () => stepFrame(-1); $('#btn-next').onclick = $('#develop-next').onclick = () => stepFrame(1);
+    $('#pull-range').oninput = event => { const amount = Number(event.target.value); $('#film-strip').style.transform = `translateX(${(100 - amount) * .42}%)`; $('#film-strip').style.opacity = String(.55 + amount * .0045); };
+    $('#film-strip').onclick = event => { const card = event.target.closest('[data-frame]'); if (!card) return; activeFrame = Number(card.dataset.frame); renderAll(); };
+    $('#film-strip').ondblclick = event => { const card = event.target.closest('[data-frame]'); if (!card) return; activeFrame = Number(card.dataset.frame); switchView('develop'); };
+    $('#contact-grid').onclick = event => { const card = event.target.closest('[data-contact-frame]'); if (card) selectFrame(Number(card.dataset.contactFrame), event); };
+    $('#contact-grid').ondblclick = event => { const card = event.target.closest('[data-contact-frame]'); if (!card) return; activeFrame = Number(card.dataset.contactFrame); switchView('develop'); };
+    let stripDrag = null; const scroll = $('#film-scroll'); scroll.onpointerdown = event => { if (event.button !== 0) return; stripDrag = { x: event.clientX, scroll: scroll.scrollLeft, moved: false }; scroll.setPointerCapture(event.pointerId); scroll.classList.add('dragging'); }; scroll.onpointermove = event => { if (!stripDrag) return; const delta = event.clientX - stripDrag.x; if (Math.abs(delta) > 4) stripDrag.moved = true; scroll.scrollLeft = stripDrag.scroll - delta; }; scroll.onpointerup = scroll.onpointercancel = () => { stripDrag = null; scroll.classList.remove('dragging'); };
+    $('#stock-picker').onclick = event => { const card = event.target.closest('[data-stock]'); if (card) setStock(card.dataset.stock); };
+    $('#adjustment-list').onpointerdown = event => { if (event.target.matches('[data-adjustment]')) beginContinuousEdit(); };
+    $('#adjustment-list').oninput = event => { const input = event.target.closest('[data-adjustment]'); const frame = activeItem(); if (!input || !frame) return; if (!pendingSnapshot) beginContinuousEdit(); frame.edit[input.dataset.adjustment] = Number(input.value); $(`#out-${input.dataset.adjustment}`).textContent = formatAdjustment(input.dataset.adjustment, Number(input.value)); save(); if (currentView === 'develop') renderDevelop(++renderVersion); else if (currentView === 'film') renderFilm(++renderVersion); };
+    $('#adjustment-list').onchange = finishContinuousEdit;
+    $('#btn-reset-look').onclick = () => { const frame = activeItem(); if (!frame) return; checkpoint(); frame.edit = { ...DEFAULT_EDIT }; save(); renderAll(); };
+    $('#btn-copy-look').onclick = () => { const frame = activeItem(); if (!frame) return toast('请先选择一格影像', 'warning'); clipboardEdit = clone(frame.edit); toast('显影参数已复制'); };
+    $('#btn-paste-look').onclick = () => { const frame = activeItem(); if (!frame || !clipboardEdit) return toast('剪贴板中没有显影参数', 'warning'); checkpoint(); frame.edit = clone(clipboardEdit); save(); renderAll(); };
+    $('#btn-sync-look').onclick = () => { const source = activeItem(); if (!source || !selection.size) return toast('请先在接触印样中选择目标', 'warning'); const count = editSelectedFrames(frame => frame.edit = clone(source.edit)); toast(`已同步到 ${count} 格影像`); };
+    $('#develop-mode').onchange = event => { settings.developMode = event.target.checked; save(); };
+    $('#develop-rating').onclick = event => { const button = event.target.closest('[data-rating]'); if (button) setRating(Number(button.dataset.rating)); };
+    $('#develop-media').onclick = event => { if (!event.target.closest('#btn-reveal-frame')) return; const frame = activeItem(); if (!frame) return; checkpoint(); frame.developed = true; save(); renderAll(); toast('显影完成'); };
+    const beforeAfter = $('#btn-before-after'); beforeAfter.onpointerdown = () => $('#develop-media').classList.add('original'); beforeAfter.onpointerup = beforeAfter.onpointercancel = beforeAfter.onpointerleave = () => $('#develop-media').classList.remove('original');
+    $('#btn-export-frame').onclick = exportCurrentFrame;
+    for (const [id, key] of [['meta-name', 'name'], ['meta-format', 'format'], ['meta-status', 'status'], ['meta-camera', 'camera'], ['meta-lens', 'lens'], ['meta-location', 'location'], ['meta-date', 'date'], ['meta-process', 'process'], ['meta-notes', 'notes']]) $('#'+id).onchange = event => { const roll = activeRoll(); if (!roll) return; checkpoint(); roll[key] = event.target.value; save(); renderAll(); };
+    $('#btn-delete-roll').onclick = () => { const roll = activeRoll(); if (!roll || !confirm(`删除胶卷“${roll.name}”？可通过撤销恢复。`)) return; checkpoint(); rolls = rolls.filter(item => item.id !== roll.id); activeRollId = rolls[0]?.id || null; activeFrame = 0; selection.clear(); save(); renderAll(); toast('胶卷已移除'); };
+    $('#btn-clear-selection').onclick = () => { selection.clear(); renderAll(); };
+    $('#btn-rate-selected').onclick = () => { const count = editSelectedFrames(frame => frame.rating = 5); toast(`${count} 格已设为精选`); };
+    $('#btn-flag-selected').onclick = () => { const count = editSelectedFrames(frame => frame.flagged = true); toast(`${count} 格已标记`); };
+    $('#btn-develop-selected').onclick = () => { const count = editSelectedFrames(frame => frame.developed = true); toast(`${count} 格已显影`); };
+    $('#btn-run-analysis').onclick = analyzeCurrentRoll; $('#btn-ai-select').onclick = smartSelect;
+    $('#btn-stage-more').onclick = () => { switchInspector('selection'); if (matchMedia('(max-width:820px)').matches) $('.inspector-panel').classList.add('mobile-show'); };
+    $('#brand-home').onclick = () => switchView('film');
+    $('#btn-undo').onclick = undo; $('#btn-redo').onclick = redo;
+    $('#btn-fullscreen').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    $('#btn-project').onclick = event => { event.stopPropagation(); $('#project-menu').hidden = !$('#project-menu').hidden; };
+    $('#btn-export-project').onclick = exportProject; $('#btn-export-contact').onclick = exportContactSheet; $('#btn-export-catalog').onclick = exportCatalog; $('#btn-import-project').onclick = () => $('#project-input').click(); $('#project-input').onchange = event => { if (event.target.files[0]) importProject(event.target.files[0]); event.target.value = ''; };
+    document.addEventListener('click', event => { if (!event.target.closest('#project-menu') && !event.target.closest('#btn-project')) $('#project-menu').hidden = true; });
+    let dragDepth = 0; document.addEventListener('dragenter', event => { if (![...event.dataTransfer.types].includes('Files')) return; event.preventDefault(); dragDepth++; $('#drop-overlay').classList.add('show'); }); document.addEventListener('dragover', event => event.preventDefault()); document.addEventListener('dragleave', () => { dragDepth--; if (dragDepth <= 0) { dragDepth = 0; $('#drop-overlay').classList.remove('show'); } }); document.addEventListener('drop', event => { event.preventDefault(); dragDepth = 0; $('#drop-overlay').classList.remove('show'); addFiles(event.dataTransfer.files); });
+    document.addEventListener('keydown', event => { const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName); if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; } if (typing) return; if (event.key === 'ArrowLeft') stepFrame(-1); if (event.key === 'ArrowRight') stepFrame(1); if (event.key === '1') switchView('film'); if (event.key === '2') switchView('contact'); if (event.key === '3') switchView('develop'); });
+    $$('[data-mobile-view]').forEach(button => button.onclick = () => { $('.library-panel').classList.remove('mobile-show'); $('.inspector-panel').classList.remove('mobile-show'); switchView(button.dataset.mobileView); });
+    $$('[data-mobile]').forEach(button => button.onclick = () => { const panel = button.dataset.mobile === 'library' ? $('.library-panel') : $('.inspector-panel'); const show = !panel.classList.contains('mobile-show'); $$('.panel').forEach(item => item.classList.remove('mobile-show')); panel.classList.toggle('mobile-show', show); });
+  }
+
+  function initialize() {
+    $('#new-roll-stock').innerHTML = Object.entries(STOCKS).map(([id, stock]) => `<option value="${id}">${stock.brand} · ${stock.name}</option>`).join('');
+    bind(); navigator.storage?.persist?.().catch(() => {});
+    if (!rolls.length && new URLSearchParams(location.search).has('demo')) loadDemo(); else renderAll();
+  }
+  initialize();
 })();

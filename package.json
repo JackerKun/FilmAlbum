@@ -2,5 +2,5 @@
   "name": "filmalbum",
   "version": "1.0.0",
   "private": true,
-  "scripts": { "check": "node --check app.js", "serve": "python3 -m http.server 8091" }
+  "scripts": { "check": "node --check app.js && node check-ui.mjs", "serve": "python3 -m http.server 8091" }
 }
