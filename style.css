@@ -99,3 +99,15 @@
 .gallery-dock{position:relative;z-index:9}
 @media(max-width:820px){.canister-wrap{width:126px}.canister{transform:scale(.72) rotateY(-5deg)}.canister-wrap.medium-format{width:92px}.roll120{transform:scale(.72) rotateY(-3deg)}.gallery-media{inset:8px 0 52px}.film-exit{left:-64px;right:64px;height:210px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+
+/* Archive-first UI: original media, compact film hardware, ratings and EXIF. */
+.inspector-tabs{grid-template-columns:repeat(2,1fr)}
+.photo-rating-card,.exif-card{border:1px solid var(--line);background:#fff;border-radius:12px;padding:13px;margin-bottom:12px}
+.photo-rating-card{display:flex;align-items:center;justify-content:space-between;gap:10px}.photo-rating-card b{display:block;font-size:10px}.photo-rating-card small{display:block;font-size:7px;color:var(--muted);margin-top:4px}.inspector-rating button{font-size:21px}
+.exif-heading{padding-bottom:10px;border-bottom:1px solid var(--line)}.exif-heading b{display:block;font-size:10px;letter-spacing:.12em}.exif-heading small{display:block;margin-top:4px;color:var(--muted);font-size:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.exif-grid>div{display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px;padding:9px 0;border-bottom:1px solid #eeeae2}.exif-grid>div:last-child{border:0}.exif-grid span{font-size:8px;color:var(--muted)}.exif-grid b{font-size:9px;font-weight:650;word-break:break-word}.empty-exif{font-size:9px;line-height:1.6;color:var(--muted);margin:12px 0 0}
+.gallery-rating{padding:0 8px}.gallery-rating button{font-size:20px;color:#5d5b55}.gallery-rating button.active{color:#e7b94d}
+.film-strip-shell{margin-right:0}.film-strip,.film-rail.format-120 .film-strip{padding-right:2px}
+.canister-wrap{width:154px}.film-exit{left:-3px;right:135px}.canister-wrap.medium-format{width:94px}.roll120-pin{display:none!important}
+.film-frame.undeveloped img,.film-frame.undeveloped video,.contact-card.undeveloped .contact-thumb img,.develop-media.undeveloped img{filter:none}
+@media(max-width:820px){.canister-wrap{width:112px}.film-exit{left:-2px;right:96px}.canister-wrap.medium-format{width:76px}.photo-rating-card{align-items:flex-start;flex-direction:column}.gallery-rating{display:none}}

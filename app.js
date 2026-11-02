@@ -34,52 +34,48 @@
   };
   const STATUS = { shooting: '拍摄中', exposed: '已拍完', developing: '显影中', developed: '已显影', scanned: '已扫描', archived: '已归档' };
   const DEFAULT_EDIT = { exposure: 0, contrast: 0, saturation: 0, temperature: 0, fade: 0, grain: 24, halation: 12, vignette: 10 };
-  const ADJUSTMENTS = [
-    ['exposure', '曝光', -100, 100, 0], ['contrast', '对比度', -100, 100, 0], ['saturation', '饱和度', -100, 100, 0],
-    ['temperature', '色温', -100, 100, 0], ['fade', '褪色', 0, 100, 0], ['grain', '银盐颗粒', 0, 100, 24],
-    ['halation', '高光晕染', 0, 100, 12], ['vignette', '暗角', 0, 100, 10],
-  ];
-  const META_KEY = 'filmalbum-rolls-v1';
-  const SETTINGS_KEY = 'filmalbum-settings-v2';
-  const DB_NAME = 'filmalbum-media-v1';
   const $ = selector => document.querySelector(selector);
   const $$ = selector => [...document.querySelectorAll(selector)];
   const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
   const clone = value => JSON.parse(JSON.stringify(value));
 
-  let rolls = migrateRolls(loadJson(META_KEY, []));
-  let settings = { developMode: true, ...loadJson(SETTINGS_KEY, {}) };
-  let activeRollId = rolls[0]?.id || null;
+  let rolls = [];
+  let settings = {};
+  let activeRollId = null;
   let activeFrame = 0;
   let currentView = 'film';
   let inspectorView = 'look';
   let rollFilter = 'all';
   let frameFilter = 'all';
-  let styleKind = 'all';
   let newRollStyleKind = 'all';
   let selection = new Set();
   let selectionAnchor = null;
-  let urls = new Map();
-  let dbPromise;
-  let clipboardEdit = null;
+  let saveTimer;
   let undoStack = [];
   let redoStack = [];
-  let pendingSnapshot = null;
   let renderVersion = 0;
   let galleryIndex = 0;
   let pendingImport = false;
   let pendingFiles = null;
   const zoomState = { develop: { scale: 1, x: 0, y: 0 }, gallery: { scale: 1, x: 0, y: 0 } };
 
-  function loadJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; } }
   function migrateRolls(items) {
     return items.map(roll => ({
       format: '135', status: 'shooting', camera: '', lens: '', location: '', date: '', process: '', notes: '',
       ...roll,
-      frames: (roll.frames || []).map(frame => ({ rating: 0, flagged: false, color: '', tags: [], edit: { ...DEFAULT_EDIT }, ...frame, edit: { ...DEFAULT_EDIT, ...(frame.edit || {}) } })),
+      frames: (roll.frames || []).map(frame => ({ rating: 0, flagged: false, color: '', tags: [], exif: {}, edit: { ...DEFAULT_EDIT }, ...frame, edit: { ...DEFAULT_EDIT, ...(frame.edit || {}) } })),
     }));
   }
-  function save() { localStorage.setItem(META_KEY, JSON.stringify(rolls)); localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
+  async function loadState() {
+    const response = await fetch('/api/state');
+    if (!response.ok) throw new Error('无法读取本地资料库');
+    const state = await response.json();
+    rolls = migrateRolls(state.rolls || []); settings = state.settings || {}; activeRollId = rolls[0]?.id || null;
+  }
+  function save() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => fetch('/api/state', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rolls, settings }) }).catch(() => toast('资料库写入失败，请确认本地服务正在运行', 'warning')), 80);
+  }
   function activeRoll() { return rolls.find(roll => roll.id === activeRollId) || rolls[0] || null; }
   function activeItem() { return activeRoll()?.frames[activeFrame] || null; }
   function snapshot() { return { rolls: clone(rolls), activeRollId, activeFrame }; }
@@ -88,23 +84,12 @@
   function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); restore(undoStack.pop()); updateHistoryButtons(); toast('已撤销'); }
   function redo() { if (!redoStack.length) return; undoStack.push(snapshot()); restore(redoStack.pop()); updateHistoryButtons(); toast('已重做'); }
   function updateHistoryButtons() { $('#btn-undo').disabled = !undoStack.length; $('#btn-redo').disabled = !redoStack.length; }
-  function beginContinuousEdit() { if (!pendingSnapshot) pendingSnapshot = snapshot(); }
-  function finishContinuousEdit() { if (!pendingSnapshot) return; undoStack.push(pendingSnapshot); if (undoStack.length > 40) undoStack.shift(); pendingSnapshot = null; redoStack = []; save(); updateHistoryButtons(); }
 
-  function db() {
-    return dbPromise ||= new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, 1);
-      request.onupgradeneeded = () => request.result.createObjectStore('media');
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
-  async function dbPut(id, blob) { const database = await db(); return transactionPromise(database, 'readwrite', store => store.put(blob, id)); }
-  async function dbGet(id) { const database = await db(); return new Promise((resolve, reject) => { const request = database.transaction('media').objectStore('media').get(id); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
-  async function dbDelete(id) { const database = await db(); return transactionPromise(database, 'readwrite', store => store.delete(id)); }
-  function transactionPromise(database, mode, action) { return new Promise((resolve, reject) => { const transaction = database.transaction('media', mode); action(transaction.objectStore('media')); transaction.oncomplete = resolve; transaction.onerror = () => reject(transaction.error); }); }
-  async function mediaUrl(frame) { if (urls.has(frame.id)) return urls.get(frame.id); const blob = await dbGet(frame.id); if (!blob) return ''; const url = URL.createObjectURL(blob); urls.set(frame.id, url); return url; }
-  function revokeUrl(id) { if (!urls.has(id)) return; URL.revokeObjectURL(urls.get(id)); urls.delete(id); }
+  async function dbPut(id, blob) { const response = await fetch(`/api/media/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob }); if (!response.ok) throw new Error('媒体写入失败'); }
+  async function dbGet(id) { const response = await fetch(`/api/media/${encodeURIComponent(id)}`); return response.ok ? response.blob() : null; }
+  async function dbDelete(id) { await fetch(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+  async function mediaUrl(frame) { return `/api/media/${encodeURIComponent(frame.id)}`; }
+  function revokeUrl() {}
   function decodeImageBlob(blob) {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(blob); const image = new Image();
@@ -114,25 +99,50 @@
     });
   }
 
+  async function extractExif(file) {
+    const result = { fileType: file.type || '未知', fileSize: file.size };
+    if (!file.type.startsWith('image/')) return result;
+    try {
+      const decoded = await decodeImageBlob(file); result.width = decoded.width; result.height = decoded.height; decoded.dispose();
+    } catch {}
+    if (file.type !== 'image/jpeg') return result;
+    try {
+      const buffer = await file.arrayBuffer(); const view = new DataView(buffer); let tiff = -1;
+      for (let offset = 2; offset + 10 < view.byteLength;) {
+        if (view.getUint8(offset) !== 0xff) break;
+        const marker = view.getUint8(offset + 1); const length = view.getUint16(offset + 2);
+        if (marker === 0xe1 && String.fromCharCode(...new Uint8Array(buffer, offset + 4, 4)) === 'Exif') { tiff = offset + 10; break; }
+        offset += 2 + length;
+      }
+      if (tiff < 0) return result;
+      const little = view.getUint16(tiff) === 0x4949; const u16 = position => view.getUint16(position, little); const u32 = position => view.getUint32(position, little);
+      const sizes = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8 };
+      const readValue = (entry, type, count) => {
+        const bytes = (sizes[type] || 1) * count; const position = bytes <= 4 ? entry + 8 : tiff + u32(entry + 8);
+        if (position < 0 || position + bytes > view.byteLength) return undefined;
+        if (type === 2) return new TextDecoder().decode(new Uint8Array(buffer, position, count)).replace(/\0+$/, '').trim();
+        const one = index => type === 3 ? u16(position + index * 2) : type === 4 ? u32(position + index * 4) : type === 5 ? u32(position + index * 8) / Math.max(1, u32(position + index * 8 + 4)) : type === 9 ? view.getInt32(position + index * 4, little) : type === 10 ? view.getInt32(position + index * 8, little) / Math.max(1, view.getInt32(position + index * 8 + 4, little)) : view.getUint8(position + index);
+        const values = Array.from({ length: count }, (_, index) => one(index)); return count === 1 ? values[0] : values;
+      };
+      const tags = {};
+      const readIfd = (offset, nested = false) => {
+        const base = tiff + offset; if (base < 0 || base + 2 > view.byteLength) return;
+        const count = Math.min(u16(base), 512);
+        for (let index = 0; index < count; index++) {
+          const entry = base + 2 + index * 12; if (entry + 12 > view.byteLength) break;
+          const tag = u16(entry); const type = u16(entry + 2); const itemCount = u32(entry + 4); tags[tag] = readValue(entry, type, itemCount);
+        }
+        if (!nested && tags[0x8769]) readIfd(tags[0x8769], true);
+      };
+      readIfd(u32(tiff + 4));
+      Object.assign(result, { make: tags[0x010f], model: tags[0x0110], lens: tags[0xa434], date: tags[0x9003] || tags[0x0132], iso: tags[0x8827], aperture: tags[0x829d], exposure: tags[0x829a], focalLength: tags[0x920a] });
+    } catch {}
+    return Object.fromEntries(Object.entries(result).filter(([, value]) => value !== undefined && value !== ''));
+  }
+
   function escapeHtml(value = '') { return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char])); }
-  function frameEdit(frame) { return { ...DEFAULT_EDIT, ...(frame?.edit || {}) }; }
-  function frameFilterCss(frame, stockId, forceStyle = false) {
-    if (!frame?.developed && !forceStyle) return 'none';
-    const edit = frameEdit(frame);
-    const stock = STOCKS[stockId] || STOCKS.portra400;
-    const brightness = Math.max(.2, 1 + edit.exposure / 130);
-    const contrast = Math.max(.2, 1 + edit.contrast / 100);
-    const saturation = Math.max(0, 1 + edit.saturation / 100);
-    const sepia = Math.max(0, edit.temperature) / 500;
-    const hue = edit.temperature * -.035;
-    const fade = edit.fade / 380;
-    return `${stock.filter} brightness(${brightness}) contrast(${contrast}) saturate(${saturation}) sepia(${sepia}) hue-rotate(${hue}deg) opacity(${1 - fade})`;
-  }
-  function frameStyle(frame, stockId) {
-    const edit = frameEdit(frame);
-    if (!frame?.developed) return '--frame-filter:none;--grain:0;--vignette:0;--halo:0';
-    return `--frame-filter:${frameFilterCss(frame, stockId)};--grain:${edit.grain / 230};--vignette:${edit.vignette / 120};--halo:${edit.halation / 100}`;
-  }
+  function frameFilterCss() { return 'none'; }
+  function frameStyle() { return '--frame-filter:none;--grain:0;--vignette:0;--halo:0'; }
   function toast(message, type = 'success') {
     const node = document.createElement('div'); node.className = `toast ${type}`; node.textContent = message; $('#toast-stack').append(node);
     setTimeout(() => node.remove(), 2600);
@@ -166,7 +176,7 @@
     checkpoint();
     const roll = activeRoll();
     for (const file of files) {
-      const frame = { id: uid(), name: file.name, type: file.type.startsWith('video/') ? 'video' : 'image', developed: !settings.developMode, createdAt: Date.now(), rating: 0, flagged: false, color: '', tags: [], edit: { ...DEFAULT_EDIT } };
+      const frame = { id: uid(), name: file.name, type: file.type.startsWith('video/') ? 'video' : 'image', developed: true, createdAt: Date.now(), rating: 0, flagged: false, color: '', tags: [], exif: await extractExif(file), edit: { ...DEFAULT_EDIT } };
       await dbPut(frame.id, file); roll.frames.push(frame);
     }
     activeFrame = Math.max(0, roll.frames.length - files.length); save(); await renderAll(); toast(`已装入 ${files.length} 格影像`);
@@ -213,7 +223,7 @@
     $('#current-index').textContent = String(activeFrame + 1).padStart(2, '0');
     const cards = await Promise.all(roll.frames.map(async (frame, index) => {
       const src = await mediaUrl(frame); const media = frame.type === 'video' ? `<video src="${src}" muted preload="metadata"></video>` : `<img src="${src}" alt="${escapeHtml(frame.name)}">`;
-      const badges = `${!frame.developed ? '<b class="original-badge" title="尚未套用风格">原</b>' : ''}${frame.rating ? `<b title="${frame.rating} 星">★${frame.rating}</b>` : ''}${frame.flagged ? '<b title="待处理">!</b>' : ''}`;
+      const badges = `${frame.rating ? `<b title="${frame.rating} 星">★${frame.rating}</b>` : ''}${frame.flagged ? '<b title="待处理">!</b>' : ''}`;
       return `<button class="film-frame ${index === activeFrame ? 'active' : ''} ${frame.developed ? '' : 'undeveloped'}" data-frame="${index}" style="${frameStyle(frame, roll.stock)}">${media}<span class="frame-badges">${badges}</span><span class="frame-no">${String(index + 1).padStart(2, '0')}A</span></button>`;
     }));
     if (version !== renderVersion) return;
@@ -236,7 +246,6 @@
     const src = await mediaUrl(frame); if (version !== renderVersion) return;
     placeholder.hidden = true; media.hidden = false; media.className = `develop-media ${frame.developed ? '' : 'undeveloped'}`; media.style.cssText = frameStyle(frame, roll.stock);
     media.innerHTML = frame.type === 'video' ? `<video src="${src}" controls playsinline></video>` : `<img src="${src}" alt="${escapeHtml(frame.name)}">`;
-    if (!frame.developed) media.insertAdjacentHTML('beforeend', `<button class="reveal-btn" id="btn-reveal-frame">✦ 套用 ${currentStock().name} 风格</button>`);
     $('#develop-name').textContent = `${String(activeFrame + 1).padStart(2, '0')}A · ${frame.name}`; renderRating(); applyZoom('develop');
   }
   async function openGallery(index) {
@@ -244,16 +253,17 @@
   }
   async function renderGallery() {
     const roll = activeRoll(); const frame = roll?.frames[galleryIndex]; if (!frame) return;
-    const src = await mediaUrl(frame); const media = $('#gallery-media'); media.className = `gallery-media ${frame.developed ? '' : 'original'}`; media.style.cssText = frameStyle(frame, roll.stock); media.innerHTML = frame.type === 'video' ? `<video src="${src}" controls playsinline></video>` : `<img src="${src}" alt="${escapeHtml(frame.name)}">`;
-    $('#gallery-roll').textContent = `${roll.name} · ${currentStock().name}`; $('#gallery-counter').textContent = `${String(galleryIndex + 1).padStart(2, '0')} / ${String(roll.frames.length).padStart(2, '0')}`; $('#gallery-original').textContent = frame.developed ? '查看原片' : `套用 ${currentStock().name}`;
+    const src = await mediaUrl(frame); const media = $('#gallery-media'); media.className = 'gallery-media'; media.style.cssText = frameStyle(frame, roll.stock); media.innerHTML = frame.type === 'video' ? `<video src="${src}" controls playsinline></video>` : `<img src="${src}" alt="${escapeHtml(frame.name)}">`;
+    $('#gallery-roll').textContent = `${roll.name} · ${frame.name}`; $('#gallery-counter').textContent = `${String(galleryIndex + 1).padStart(2, '0')} / ${String(roll.frames.length).padStart(2, '0')}`;
     const thumbs = await Promise.all(roll.frames.map(async (item, index) => { const thumb = await mediaUrl(item); const tag = item.type === 'video' ? `<video src="${thumb}" muted></video>` : `<img src="${thumb}" alt="">`; return `<button class="gallery-thumb ${index === galleryIndex ? 'active' : ''}" data-gallery-frame="${index}" style="${frameStyle(item, roll.stock)}">${tag}<span>${String(index + 1).padStart(2, '0')}</span></button>`; }));
-    $('#gallery-thumbs').innerHTML = thumbs.join(''); applyZoom('gallery'); requestAnimationFrame(() => $('#gallery-thumbs .active')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }));
+    $('#gallery-thumbs').innerHTML = thumbs.join(''); renderRating(); applyZoom('gallery'); requestAnimationFrame(() => $('#gallery-thumbs .active')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }));
   }
   function closeGallery() { $('#gallery').hidden = true; $('#gallery-media').innerHTML = ''; document.body.style.overflow = ''; }
   function stepGallery(delta) { const roll = activeRoll(); if (!roll?.frames.length) return; galleryIndex = (galleryIndex + delta + roll.frames.length) % roll.frames.length; activeFrame = galleryIndex; resetZoom('gallery'); renderGallery(); }
   function renderRating() {
     const rating = activeItem()?.rating || 0;
-    $('#develop-rating').innerHTML = [1, 2, 3, 4, 5].map(value => `<button data-rating="${value}" class="${value <= rating ? 'active' : ''}" aria-label="${value} 星">★</button>`).join('');
+    const markup = [1, 2, 3, 4, 5].map(value => `<button data-rating="${value}" class="${value <= rating ? 'active' : ''}" aria-label="${value} 星">★</button>`).join('');
+    ['#develop-rating', '#frame-rating', '#gallery-rating'].forEach(selector => { const node = $(selector); if (node) node.innerHTML = markup; });
   }
   function updateCanister() {
     const stock = currentStock(); const canister = $('#canister'); const medium = is120(activeRoll()?.format);
@@ -265,27 +275,24 @@
   }
   function renderInspector() {
     const roll = activeRoll(); const frame = activeItem();
-    $('#stock-picker').innerHTML = Object.entries(STOCKS).filter(([, stock]) => styleKind === 'all' || stock.group === styleKind).map(([id, stock]) => `<button class="stock-card ${roll?.stock === id ? 'active' : ''}" data-stock="${id}">${stockIcon(stock, roll?.format)}<span><b>${stock.name}</b><small>${stock.brand} · ${stock.kind}</small></span></button>`).join('');
-    const edit = frameEdit(frame);
-    $('#adjustment-list').innerHTML = ADJUSTMENTS.map(([key, label, min, max]) => `<div class="adjustment"><div><label for="adj-${key}">${label}</label><output id="out-${key}">${formatAdjustment(key, edit[key])}</output></div><input id="adj-${key}" data-adjustment="${key}" type="range" min="${min}" max="${max}" value="${edit[key]}" ${frame ? '' : 'disabled'}></div>`).join('');
-    $('#develop-mode').checked = settings.developMode;
+    renderRating();
+    const exif = frame?.exif || {};
+    const rows = [
+      ['相机', [exif.make, exif.model].filter(Boolean).join(' ')], ['镜头', exif.lens], ['拍摄时间', exif.date?.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3')],
+      ['尺寸', exif.width && exif.height ? `${exif.width} × ${exif.height}` : ''], ['焦距', exif.focalLength ? `${Number(exif.focalLength).toFixed(1).replace('.0', '')} mm` : ''],
+      ['光圈', exif.aperture ? `f/${Number(exif.aperture).toFixed(1).replace('.0', '')}` : ''], ['快门', exif.exposure ? (exif.exposure < 1 ? `1/${Math.round(1 / exif.exposure)} s` : `${exif.exposure} s`) : ''], ['ISO', exif.iso],
+    ].filter(([, value]) => value);
+    $('#frame-file-info').textContent = frame ? `${frame.name} · ${exif.fileSize ? formatBytes(exif.fileSize) : frame.type}` : '尚未选择照片';
+    $('#exif-grid').innerHTML = rows.length ? rows.map(([label, value]) => `<div><span>${label}</span><b>${escapeHtml(value)}</b></div>`).join('') : '<p class="empty-exif">这张照片没有可读取的 EXIF 信息</p>';
     for (const [id, key] of [['meta-name', 'name'], ['meta-format', 'format'], ['meta-status', 'status'], ['meta-camera', 'camera'], ['meta-lens', 'lens'], ['meta-location', 'location'], ['meta-date', 'date'], ['meta-process', 'process'], ['meta-notes', 'notes']]) $('#'+id).value = roll?.[key] || '';
-    renderAnalysisSummary();
   }
+  function formatBytes(value) { if (!Number.isFinite(value)) return ''; const units = ['B', 'KB', 'MB', 'GB']; let size = value; let unit = 0; while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; } return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`; }
   function renderNewRollPicker() {
     const format = $('#new-roll-format').value;
     const selected = $('#new-roll-stock').value || 'portra400';
     $('#new-roll-stock-grid').innerHTML = Object.entries(STOCKS).filter(([, stock]) => newRollStyleKind === 'all' || stock.group === newRollStyleKind).map(([id, stock]) => `<button type="button" class="new-stock-card ${selected === id ? 'active' : ''}" data-new-stock="${id}">${stockIcon(stock, format)}<span><b>${stock.name}</b><small>${stock.brand} · ISO ${stock.iso}</small></span></button>`).join('');
   }
-  function formatAdjustment(key, value) { if (['grain', 'halation', 'vignette', 'fade'].includes(key)) return `${value}%`; return value > 0 ? `+${value}` : String(value); }
   function renderSelectionState() { $('#selection-summary').hidden = !selection.size; $('#selection-count').textContent = selection.size; }
-  function renderAnalysisSummary() {
-    const frames = activeRoll()?.frames || []; const analyzed = frames.filter(frame => frame.analysis);
-    if (!analyzed.length) { $('#analysis-summary').innerHTML = '<p class="empty-analysis">尚未分析当前胶卷</p>'; return; }
-    const best = analyzed.filter(frame => frame.analysis.score >= 80).length; const issues = analyzed.filter(frame => frame.analysis.score < 48).length; const duplicates = analyzed.filter(frame => frame.analysis.duplicateOf).length;
-    $('#analysis-summary').innerHTML = `<div class="analysis-stat"><span>推荐精选</span><b>${best}</b></div><div class="analysis-stat"><span>可能需要检查</span><b>${issues}</b></div><div class="analysis-stat"><span>相似画面</span><b>${duplicates}</b></div>`;
-  }
-
   function switchView(view) {
     currentView = view; $$('.view').forEach(node => node.classList.toggle('active', node.id === `${view}-view`)); $$('[data-view]').forEach(button => button.classList.toggle('active', button.dataset.view === view)); $$('[data-mobile-view]').forEach(button => button.classList.toggle('active', button.dataset.mobileView === view)); renderAll();
   }
@@ -326,8 +333,6 @@
     $(toolbarSelector).onclick = event => { const button = event.target.closest('[data-zoom]'); if (button) changeZoom(scope, button.dataset.zoom); };
   }
   function setRating(value) { const frame = activeItem(); if (!frame) return; checkpoint(); frame.rating = frame.rating === value ? 0 : value; save(); renderAll(); }
-  function setStock(id) { const roll = activeRoll(); if (!roll || roll.stock === id) return; checkpoint(); roll.stock = id; save(); renderAll(); }
-  function editSelectedFrames(mutator) { const roll = activeRoll(); if (!roll) return 0; const targets = selection.size ? roll.frames.filter(frame => selection.has(frame.id)) : [activeItem()].filter(Boolean); if (!targets.length) return 0; checkpoint(); targets.forEach(mutator); save(); renderAll(); return targets.length; }
 
   async function exportProject() {
     if (!rolls.length) return toast('没有可导出的胶卷', 'warning');
@@ -356,37 +361,10 @@
     if (rolls.length && !confirm('导入会替换当前工作区。建议先导出当前项目，是否继续？')) return;
     toast('正在恢复媒体与编辑记录');
     for (const [id, dataUrl] of Object.entries(project.media || {})) await dbPut(id, dataUrlToBlob(dataUrl));
-    rolls = migrateRolls(project.rolls); settings = { developMode: true, ...(project.settings || {}) }; activeRollId = rolls[0]?.id || null; activeFrame = 0; selection.clear(); urls.forEach(url => URL.revokeObjectURL(url)); urls.clear(); save(); await renderAll(); toast(`已恢复 ${rolls.length} 卷胶片`);
+    rolls = migrateRolls(project.rolls); settings = project.settings || {}; activeRollId = rolls[0]?.id || null; activeFrame = 0; selection.clear(); save(); await renderAll(); toast(`已恢复 ${rolls.length} 卷胶片`);
   }
   function blobToDataUrl(blob) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(blob); }); }
   function dataUrlToBlob(dataUrl) { const [header, data] = dataUrl.split(','); const mime = header.match(/data:(.*?);/)?.[1] || 'application/octet-stream'; const binary = atob(data); const bytes = new Uint8Array(binary.length); for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i); return new Blob([bytes], { type: mime }); }
-
-  async function analyzeCurrentRoll() {
-    const roll = activeRoll(); if (!roll?.frames.length) return toast('当前胶卷没有照片', 'warning');
-    const photos = roll.frames.filter(frame => frame.type === 'image'); if (!photos.length) return toast('画质分析目前仅支持照片', 'warning');
-    checkpoint(); const progress = $('#analysis-progress'); progress.hidden = false; const hashes = [];
-    try {
-      for (let index = 0; index < photos.length; index++) {
-        const frame = photos[index]; const blob = await dbGet(frame.id); if (blob) { frame.analysis = await analyzeImage(blob); for (const prior of hashes) if (hashDistance(frame.analysis.hash, prior.hash) <= 7) { frame.analysis.duplicateOf = prior.id; break; } hashes.push({ id: frame.id, hash: frame.analysis.hash }); }
-        progress.querySelector('em').style.width = `${((index + 1) / photos.length) * 100}%`; progress.querySelector('span').textContent = `正在分析 ${index + 1} / ${photos.length}`; await new Promise(resolve => requestAnimationFrame(resolve));
-      }
-      save(); renderAll(); switchInspector('selection'); toast('本地画质分析完成');
-    } catch (error) { toast(error.message || '画质分析失败，请检查图片格式', 'warning'); }
-    finally { progress.hidden = true; }
-  }
-  async function analyzeImage(blob) {
-    const decoded = await decodeImageBlob(blob); const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 48; const context = canvas.getContext('2d', { willReadFrequently: true }); context.drawImage(decoded.image, 0, 0, 64, 48); decoded.dispose();
-    const pixels = context.getImageData(0, 0, 64, 48).data; const luminance = new Float32Array(64 * 48); let sum = 0;
-    for (let i = 0, p = 0; i < pixels.length; i += 4, p++) { const value = pixels[i] * .2126 + pixels[i + 1] * .7152 + pixels[i + 2] * .0722; luminance[p] = value; sum += value; }
-    const brightness = sum / luminance.length; let variance = 0; let sharpness = 0;
-    for (let y = 0; y < 48; y++) for (let x = 0; x < 64; x++) { const index = y * 64 + x; variance += (luminance[index] - brightness) ** 2; if (x < 63) sharpness += Math.abs(luminance[index] - luminance[index + 1]); if (y < 47) sharpness += Math.abs(luminance[index] - luminance[index + 64]); }
-    const contrast = Math.sqrt(variance / luminance.length); sharpness /= luminance.length * 2;
-    let score = 100 - Math.min(40, Math.abs(brightness - 128) * .32) + Math.min(12, contrast / 4) + Math.min(14, sharpness / 2.5) - 18; score = Math.round(Math.max(20, Math.min(99, score)));
-    const hashValues = []; for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) hashValues.push(luminance[(y * 6) * 64 + x * 8]); const mean = hashValues.reduce((a, b) => a + b, 0) / 64;
-    return { score, brightness: Math.round(brightness), contrast: Math.round(contrast), sharpness: Math.round(sharpness), hash: hashValues.map(value => value > mean ? '1' : '0').join('') };
-  }
-  function hashDistance(a = '', b = '') { let count = 0; for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) count++; return count; }
-  async function smartSelect() { const roll = activeRoll(); if (!roll) return; if (!roll.frames.some(frame => frame.analysis)) await analyzeCurrentRoll(); selection.clear(); roll.frames.filter(frame => frame.analysis?.score >= 78 && !frame.analysis?.duplicateOf).forEach(frame => selection.add(frame.id)); frameFilter = 'favorites'; renderAll(); toast(`已选出 ${selection.size} 格推荐画面`); }
 
   async function exportCurrentFrame() {
     const roll = activeRoll(); const frame = activeItem(); if (!roll || !frame || frame.type !== 'image') return toast('当前帧无法导出为照片', 'warning');
@@ -419,34 +397,18 @@
     $('#grid-size').oninput = event => $('#contact-grid').style.setProperty('--thumb', `${event.target.value}px`);
     $('#btn-prev').onclick = $('#develop-prev').onclick = () => stepFrame(-1); $('#btn-next').onclick = $('#develop-next').onclick = () => stepFrame(1);
     $('#pull-range').oninput = event => { const amount = Number(event.target.value); $('#film-strip').style.transform = `translateX(${(100 - amount) * .42}%)`; $('#film-strip').style.opacity = String(.55 + amount * .0045); };
-    let suppressFilmClick = false;
-    $('#film-strip').onclick = event => { if (suppressFilmClick) return; const card = event.target.closest('[data-frame]'); if (!card) return; const index = Number(card.dataset.frame); if (index === activeFrame) { openGallery(index); return; } activeFrame = index; renderAll(); };
-    $('#film-strip').ondblclick = event => { const card = event.target.closest('[data-frame]'); if (!card) return; openGallery(Number(card.dataset.frame)); };
-    $('#contact-grid').onclick = event => { const card = event.target.closest('[data-contact-frame]'); if (card) selectFrame(Number(card.dataset.contactFrame), event); };
-    $('#contact-grid').ondblclick = event => { const card = event.target.closest('[data-contact-frame]'); if (!card) return; openGallery(Number(card.dataset.contactFrame)); };
+    let suppressFilmClick = false; let filmClickTimer; let contactClickTimer;
+    $('#film-strip').onclick = event => { if (suppressFilmClick) return; const card = event.target.closest('[data-frame]'); if (!card) return; const index = Number(card.dataset.frame); clearTimeout(filmClickTimer); filmClickTimer = setTimeout(() => { activeFrame = index; renderAll(); }, 220); };
+    $('#film-strip').ondblclick = event => { const card = event.target.closest('[data-frame]'); if (!card) return; clearTimeout(filmClickTimer); openGallery(Number(card.dataset.frame)); };
+    $('#contact-grid').onclick = event => { const card = event.target.closest('[data-contact-frame]'); if (!card) return; const index = Number(card.dataset.contactFrame); const modifiers = { shiftKey: event.shiftKey, metaKey: event.metaKey, ctrlKey: event.ctrlKey }; clearTimeout(contactClickTimer); contactClickTimer = setTimeout(() => selectFrame(index, modifiers), 220); };
+    $('#contact-grid').ondblclick = event => { const card = event.target.closest('[data-contact-frame]'); if (!card) return; clearTimeout(contactClickTimer); openGallery(Number(card.dataset.contactFrame)); };
     let stripDrag = null; const scroll = $('#film-scroll'); scroll.onpointerdown = event => { if (event.button !== 0) return; stripDrag = { x: event.clientX, scroll: scroll.scrollLeft, moved: false, pointerId: event.pointerId }; }; scroll.onpointermove = event => { if (!stripDrag) return; const delta = event.clientX - stripDrag.x; if (Math.abs(delta) > 4 && !stripDrag.moved) { stripDrag.moved = true; scroll.setPointerCapture?.(event.pointerId); scroll.classList.add('dragging'); } if (stripDrag.moved) scroll.scrollLeft = stripDrag.scroll - delta; }; scroll.onpointerup = scroll.onpointercancel = () => { suppressFilmClick = Boolean(stripDrag?.moved); if (suppressFilmClick) setTimeout(() => suppressFilmClick = false, 0); stripDrag = null; scroll.classList.remove('dragging'); };
-    $('#stock-picker').onclick = event => { const card = event.target.closest('[data-stock]'); if (card) setStock(card.dataset.stock); };
-    $('#style-filter').onclick = event => { const button = event.target.closest('[data-style-kind]'); if (!button) return; styleKind = button.dataset.styleKind; $$('[data-style-kind]').forEach(node => node.classList.toggle('active', node === button)); renderInspector(); };
-    $('#adjustment-list').onpointerdown = event => { if (event.target.matches('[data-adjustment]')) beginContinuousEdit(); };
-    $('#adjustment-list').oninput = event => { const input = event.target.closest('[data-adjustment]'); const frame = activeItem(); if (!input || !frame) return; if (!pendingSnapshot) beginContinuousEdit(); frame.edit[input.dataset.adjustment] = Number(input.value); $(`#out-${input.dataset.adjustment}`).textContent = formatAdjustment(input.dataset.adjustment, Number(input.value)); save(); if (currentView === 'develop') renderDevelop(++renderVersion); else if (currentView === 'film') renderFilm(++renderVersion); };
-    $('#adjustment-list').onchange = finishContinuousEdit;
-    $('#btn-reset-look').onclick = () => { const frame = activeItem(); if (!frame) return; checkpoint(); frame.edit = { ...DEFAULT_EDIT }; save(); renderAll(); };
-    $('#btn-copy-look').onclick = () => { const frame = activeItem(); if (!frame) return toast('请先选择一格影像', 'warning'); clipboardEdit = clone(frame.edit); toast('显影参数已复制'); };
-    $('#btn-paste-look').onclick = () => { const frame = activeItem(); if (!frame || !clipboardEdit) return toast('剪贴板中没有显影参数', 'warning'); checkpoint(); frame.edit = clone(clipboardEdit); save(); renderAll(); };
-    $('#btn-sync-look').onclick = () => { const source = activeItem(); if (!source || !selection.size) return toast('请先在接触印样中选择目标', 'warning'); const count = editSelectedFrames(frame => frame.edit = clone(source.edit)); toast(`已同步到 ${count} 格影像`); };
-    $('#develop-mode').onchange = event => { settings.developMode = event.target.checked; save(); };
-    $('#develop-rating').onclick = event => { const button = event.target.closest('[data-rating]'); if (button) setRating(Number(button.dataset.rating)); };
-    $('#develop-media').onclick = event => { if (!event.target.closest('#btn-reveal-frame')) return; const frame = activeItem(); if (!frame) return; checkpoint(); frame.developed = true; save(); renderAll(); toast(`${currentStock().name} 风格已应用`); };
+    ['#develop-rating', '#frame-rating', '#gallery-rating'].forEach(selector => $(selector).onclick = event => { const button = event.target.closest('[data-rating]'); if (button) setRating(Number(button.dataset.rating)); });
     const beforeAfter = $('#btn-before-after'); beforeAfter.onpointerdown = () => $('#develop-media').classList.add('original'); beforeAfter.onpointerup = beforeAfter.onpointercancel = beforeAfter.onpointerleave = () => $('#develop-media').classList.remove('original');
     $('#btn-export-frame').onclick = exportCurrentFrame;
     for (const [id, key] of [['meta-name', 'name'], ['meta-format', 'format'], ['meta-status', 'status'], ['meta-camera', 'camera'], ['meta-lens', 'lens'], ['meta-location', 'location'], ['meta-date', 'date'], ['meta-process', 'process'], ['meta-notes', 'notes']]) $('#'+id).onchange = event => { const roll = activeRoll(); if (!roll) return; checkpoint(); roll[key] = event.target.value; save(); renderAll(); };
     $('#btn-delete-roll').onclick = () => { const roll = activeRoll(); if (!roll || !confirm(`删除胶卷“${roll.name}”？可通过撤销恢复。`)) return; checkpoint(); rolls = rolls.filter(item => item.id !== roll.id); activeRollId = rolls[0]?.id || null; activeFrame = 0; selection.clear(); save(); renderAll(); toast('胶卷已移除'); };
     $('#btn-clear-selection').onclick = () => { selection.clear(); renderAll(); };
-    $('#btn-rate-selected').onclick = () => { const count = editSelectedFrames(frame => frame.rating = 5); toast(`${count} 格已设为精选`); };
-    $('#btn-flag-selected').onclick = () => { const count = editSelectedFrames(frame => frame.flagged = true); toast(`${count} 格已标记`); };
-    $('#btn-develop-selected').onclick = () => { const count = editSelectedFrames(frame => frame.developed = true); toast(`${count} 格已套用当前风格`); };
-    $('#btn-run-analysis').onclick = analyzeCurrentRoll; $('#btn-ai-select').onclick = smartSelect;
-    $('#btn-stage-more').onclick = () => { switchInspector('selection'); if (matchMedia('(max-width:820px)').matches) $('.inspector-panel').classList.add('mobile-show'); };
     $('#brand-home').onclick = () => switchView('film');
     $('#btn-undo').onclick = undo; $('#btn-redo').onclick = redo;
     $('#btn-fullscreen').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
@@ -454,20 +416,20 @@
     $('#gallery-close').onclick = closeGallery; $('#gallery-prev').onclick = () => stepGallery(-1); $('#gallery-next').onclick = () => stepGallery(1);
     $('#gallery-toggle-thumbs').onclick = () => { const collapsed = $('#gallery').classList.toggle('thumbs-collapsed'); $('#gallery-toggle-thumbs').textContent = collapsed ? '展开缩略图' : '收起缩略图'; };
     $('#gallery-thumbs').onclick = event => { const thumb = event.target.closest('[data-gallery-frame]'); if (!thumb) return; galleryIndex = Number(thumb.dataset.galleryFrame); activeFrame = galleryIndex; resetZoom('gallery'); renderGallery(); };
-    $('#gallery-original').onclick = () => { const frame = activeRoll()?.frames[galleryIndex]; if (!frame) return; if (!frame.developed) { checkpoint(); frame.developed = true; save(); renderGallery(); renderAll(); toast(`${currentStock().name} 风格已应用`); } else { const media = $('#gallery-media'); media.classList.toggle('original'); $('#gallery-original').textContent = media.classList.contains('original') ? '返回胶卷风格' : '查看原片'; } };
     $('#btn-project').onclick = event => { event.stopPropagation(); $('#project-menu').hidden = !$('#project-menu').hidden; };
     $('#btn-export-project').onclick = exportProject; $('#btn-export-contact').onclick = exportContactSheet; $('#btn-export-catalog').onclick = exportCatalog; $('#btn-import-project').onclick = () => $('#project-input').click(); $('#project-input').onchange = event => { if (event.target.files[0]) importProject(event.target.files[0]); event.target.value = ''; };
     document.addEventListener('click', event => { if (!event.target.closest('#project-menu') && !event.target.closest('#btn-project')) $('#project-menu').hidden = true; });
     let dragDepth = 0; document.addEventListener('dragenter', event => { if (![...event.dataTransfer.types].includes('Files')) return; event.preventDefault(); dragDepth++; $('#drop-overlay').classList.add('show'); }); document.addEventListener('dragover', event => event.preventDefault()); document.addEventListener('dragleave', () => { dragDepth--; if (dragDepth <= 0) { dragDepth = 0; $('#drop-overlay').classList.remove('show'); } }); document.addEventListener('drop', event => { event.preventDefault(); dragDepth = 0; $('#drop-overlay').classList.remove('show'); addFiles(event.dataTransfer.files); });
-    document.addEventListener('keydown', event => { const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName); if (event.key === 'Escape' && !$('#gallery').hidden) { closeGallery(); return; } if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; } if (typing) return; const galleryOpen = !$('#gallery').hidden; if (event.key === 'ArrowLeft') galleryOpen ? stepGallery(-1) : stepFrame(-1); if (event.key === 'ArrowRight') galleryOpen ? stepGallery(1) : stepFrame(1); if (galleryOpen) return; if (event.key === '1') switchView('film'); if (event.key === '2') switchView('contact'); if (event.key === '3') switchView('develop'); });
+    document.addEventListener('keydown', event => { const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName); if (event.key === 'Escape' && !$('#gallery').hidden) { closeGallery(); return; } if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; } if (typing) return; const galleryOpen = !$('#gallery').hidden; if (event.key === 'ArrowLeft') galleryOpen ? stepGallery(-1) : stepFrame(-1); if (event.key === 'ArrowRight') galleryOpen ? stepGallery(1) : stepFrame(1); if (galleryOpen) return; if (event.key === '1') switchView('film'); if (event.key === '2') switchView('contact'); });
     $$('[data-mobile-view]').forEach(button => button.onclick = () => { $('.library-panel').classList.remove('mobile-show'); $('.inspector-panel').classList.remove('mobile-show'); switchView(button.dataset.mobileView); });
     $$('[data-mobile]').forEach(button => button.onclick = () => { const panel = button.dataset.mobile === 'library' ? $('.library-panel') : $('.inspector-panel'); const show = !panel.classList.contains('mobile-show'); $$('.panel').forEach(item => item.classList.remove('mobile-show')); panel.classList.toggle('mobile-show', show); });
   }
 
-  function initialize() {
+  async function initialize() {
+    try { await loadState(); } catch { toast('未连接本地资料库服务，请使用 npm run serve 启动', 'warning'); }
     renderNewRollPicker();
-    bind(); navigator.storage?.persist?.().catch(() => {});
+    bind();
     if (!rolls.length && new URLSearchParams(location.search).has('demo')) loadDemo(); else renderAll();
   }
-  initialize();
+  initialize().catch(error => { console.error(error); toast('FilmAlbum 初始化失败', 'warning'); });
 })();
