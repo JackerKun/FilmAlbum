@@ -2,14 +2,35 @@
   'use strict';
 
   const STOCKS = {
-    portra400: { name: 'PORTRA 400', brand: 'KODAK', iso: '400', color: '#315747', color2: '#e6c16f', kind: 'COLOR NEGATIVE', filter: 'saturate(.9) contrast(.97) brightness(1.03) sepia(.06)' },
-    gold200: { name: 'GOLD 200', brand: 'KODAK', iso: '200', color: '#d4a51e', color2: '#ba2727', kind: 'COLOR NEGATIVE', filter: 'saturate(1.08) contrast(1.03) sepia(.13)' },
-    ektar100: { name: 'EKTAR 100', brand: 'KODAK', iso: '100', color: '#861f2f', color2: '#ddb25f', kind: 'COLOR NEGATIVE', filter: 'saturate(1.2) contrast(1.08)' },
-    velvia50: { name: 'VELVIA 50', brand: 'FUJIFILM', iso: '50', color: '#158364', color2: '#ec3045', kind: 'COLOR REVERSAL', filter: 'saturate(1.25) contrast(1.09) brightness(.98) hue-rotate(-2deg)' },
-    pro400h: { name: 'PRO 400H', brand: 'FUJIFILM', iso: '400', color: '#2b9a83', color2: '#f2e8ca', kind: 'COLOR NEGATIVE', filter: 'saturate(.84) contrast(.94) brightness(1.05) hue-rotate(-3deg)' },
-    cinestill800t: { name: '800T', brand: 'CINESTILL', iso: '800', color: '#243552', color2: '#c92d3b', kind: 'COLOR NEGATIVE', filter: 'saturate(.94) contrast(1.1) hue-rotate(5deg)' },
-    trix400: { name: 'TRI-X 400', brand: 'KODAK', iso: '400', color: '#1a1916', color2: '#d5a828', kind: 'BLACK & WHITE', filter: 'grayscale(1) contrast(1.18) brightness(.98)' },
-    hp5: { name: 'HP5 PLUS', brand: 'ILFORD', iso: '400', color: '#202020', color2: '#e8e7df', kind: 'BLACK & WHITE', filter: 'grayscale(1) contrast(1.1) brightness(1.01)' },
+    portra160: { name: 'PORTRA 160', brand: 'KODAK', iso: '160', color: '#385a49', color2: '#e5c47d', kind: 'COLOR NEGATIVE', group: 'color', filter: 'saturate(.84) contrast(.94) brightness(1.04) sepia(.05)' },
+    portra400: { name: 'PORTRA 400', brand: 'KODAK', iso: '400', color: '#315747', color2: '#e6c16f', kind: 'COLOR NEGATIVE', group: 'color', filter: 'saturate(.9) contrast(.97) brightness(1.03) sepia(.06)' },
+    portra800: { name: 'PORTRA 800', brand: 'KODAK', iso: '800', color: '#35594a', color2: '#e5b962', kind: 'COLOR NEGATIVE', group: 'color', filter: 'saturate(.93) contrast(1.02) brightness(1.01) sepia(.08)' },
+    gold200: { name: 'GOLD 200', brand: 'KODAK', iso: '200', color: '#d4a51e', color2: '#ba2727', kind: 'COLOR NEGATIVE', group: 'color', filter: 'saturate(1.08) contrast(1.03) sepia(.13)' },
+    colorplus200: { name: 'COLORPLUS 200', brand: 'KODAK', iso: '200', color: '#e8ad22', color2: '#cb3433', kind: 'COLOR NEGATIVE', group: 'color', filter: 'saturate(1.04) contrast(1.01) sepia(.1) brightness(1.02)' },
+    ultramax400: { name: 'ULTRAMAX 400', brand: 'KODAK', iso: '400', color: '#e7a917', color2: '#24488a', kind: 'COLOR NEGATIVE', group: 'color', filter: 'saturate(1.15) contrast(1.06) hue-rotate(-2deg)' },
+    ektar100: { name: 'EKTAR 100', brand: 'KODAK', iso: '100', color: '#861f2f', color2: '#ddb25f', kind: 'COLOR NEGATIVE', group: 'color', filter: 'saturate(1.2) contrast(1.08)' },
+    superia400: { name: 'SUPERIA X-TRA 400', brand: 'FUJIFILM', iso: '400', color: '#149d67', color2: '#d92839', kind: 'COLOR NEGATIVE', group: 'color', filter: 'saturate(1.08) contrast(1.05) hue-rotate(-4deg)' },
+    c200: { name: 'C200', brand: 'FUJIFILM', iso: '200', color: '#139b72', color2: '#efe9ce', kind: 'COLOR NEGATIVE', group: 'color', filter: 'saturate(1.02) contrast(.98) brightness(1.03) hue-rotate(-4deg)' },
+    pro400h: { name: 'PRO 400H', brand: 'FUJIFILM', iso: '400', color: '#2b9a83', color2: '#f2e8ca', kind: 'COLOR NEGATIVE', group: 'color', filter: 'saturate(.84) contrast(.94) brightness(1.05) hue-rotate(-3deg)' },
+    velvia50: { name: 'VELVIA 50', brand: 'FUJIFILM', iso: '50', color: '#158364', color2: '#ec3045', kind: 'COLOR REVERSAL', group: 'slide', filter: 'saturate(1.25) contrast(1.09) brightness(.98) hue-rotate(-2deg)' },
+    velvia100: { name: 'VELVIA 100', brand: 'FUJIFILM', iso: '100', color: '#11825f', color2: '#e92840', kind: 'COLOR REVERSAL', group: 'slide', filter: 'saturate(1.3) contrast(1.12) brightness(.97) hue-rotate(-3deg)' },
+    provia100f: { name: 'PROVIA 100F', brand: 'FUJIFILM', iso: '100', color: '#166f5b', color2: '#3269a0', kind: 'COLOR REVERSAL', group: 'slide', filter: 'saturate(1.08) contrast(1.08) brightness(.99)' },
+    e100: { name: 'EKTACHROME E100', brand: 'KODAK', iso: '100', color: '#285b9d', color2: '#efc442', kind: 'COLOR REVERSAL', group: 'slide', filter: 'saturate(1.12) contrast(1.1) hue-rotate(2deg)' },
+    cinestill50d: { name: '50D', brand: 'CINESTILL', iso: '50', color: '#db7e2b', color2: '#2b5f7d', kind: 'CINEMA FILM', group: 'cinema', filter: 'saturate(.96) contrast(1.05) brightness(1.02) sepia(.03)' },
+    cinestill400d: { name: '400D', brand: 'CINESTILL', iso: '400', color: '#d85c31', color2: '#325f79', kind: 'CINEMA FILM', group: 'cinema', filter: 'saturate(.98) contrast(1.06) sepia(.04)' },
+    cinestill800t: { name: '800T', brand: 'CINESTILL', iso: '800', color: '#243552', color2: '#c92d3b', kind: 'CINEMA FILM', group: 'cinema', filter: 'saturate(.94) contrast(1.1) hue-rotate(5deg)' },
+    vision250d: { name: 'VISION3 250D', brand: 'KODAK', iso: '250', color: '#b88a32', color2: '#253a54', kind: 'CINEMA FILM', group: 'cinema', filter: 'saturate(.88) contrast(.94) brightness(1.03) sepia(.04)' },
+    vision500t: { name: 'VISION3 500T', brand: 'KODAK', iso: '500', color: '#293c5b', color2: '#c7a354', kind: 'CINEMA FILM', group: 'cinema', filter: 'saturate(.86) contrast(1.02) hue-rotate(5deg)' },
+    lomoPurple: { name: 'PURPLE', brand: 'LOMOGRAPHY', iso: '400', color: '#6b3d78', color2: '#e0be40', kind: 'CREATIVE COLOR', group: 'color', filter: 'saturate(1.22) contrast(1.08) hue-rotate(28deg)' },
+    lomoMetropolis: { name: 'METROPOLIS', brand: 'LOMOGRAPHY', iso: '400', color: '#566255', color2: '#d6b55d', kind: 'CREATIVE COLOR', group: 'color', filter: 'saturate(.58) contrast(1.14) sepia(.08)' },
+    trix400: { name: 'TRI-X 400', brand: 'KODAK', iso: '400', color: '#1a1916', color2: '#d5a828', kind: 'BLACK & WHITE', group: 'bw', filter: 'grayscale(1) contrast(1.18) brightness(.98)' },
+    tmax100: { name: 'T-MAX 100', brand: 'KODAK', iso: '100', color: '#222', color2: '#d84b36', kind: 'BLACK & WHITE', group: 'bw', filter: 'grayscale(1) contrast(1.1) brightness(1.02)' },
+    tmax400: { name: 'T-MAX 400', brand: 'KODAK', iso: '400', color: '#202020', color2: '#ce4534', kind: 'BLACK & WHITE', group: 'bw', filter: 'grayscale(1) contrast(1.15)' },
+    hp5: { name: 'HP5 PLUS', brand: 'ILFORD', iso: '400', color: '#202020', color2: '#e8e7df', kind: 'BLACK & WHITE', group: 'bw', filter: 'grayscale(1) contrast(1.1) brightness(1.01)' },
+    fp4: { name: 'FP4 PLUS', brand: 'ILFORD', iso: '125', color: '#242424', color2: '#dfdfda', kind: 'BLACK & WHITE', group: 'bw', filter: 'grayscale(1) contrast(1.06) brightness(1.02)' },
+    delta100: { name: 'DELTA 100', brand: 'ILFORD', iso: '100', color: '#232323', color2: '#b9a26a', kind: 'BLACK & WHITE', group: 'bw', filter: 'grayscale(1) contrast(1.12) brightness(1.01)' },
+    delta400: { name: 'DELTA 400', brand: 'ILFORD', iso: '400', color: '#202020', color2: '#ad9662', kind: 'BLACK & WHITE', group: 'bw', filter: 'grayscale(1) contrast(1.17)' },
+    acros100: { name: 'ACROS II', brand: 'FUJIFILM', iso: '100', color: '#1d1d1d', color2: '#e9e8df', kind: 'BLACK & WHITE', group: 'bw', filter: 'grayscale(1) contrast(1.13) brightness(1.02)' },
   };
   const STATUS = { shooting: '拍摄中', exposed: '已拍完', developing: '显影中', developed: '已显影', scanned: '已扫描', archived: '已归档' };
   const DEFAULT_EDIT = { exposure: 0, contrast: 0, saturation: 0, temperature: 0, fade: 0, grain: 24, halation: 12, vignette: 10 };
@@ -34,6 +55,7 @@
   let inspectorView = 'look';
   let rollFilter = 'all';
   let frameFilter = 'all';
+  let styleKind = 'all';
   let selection = new Set();
   let selectionAnchor = null;
   let urls = new Map();
@@ -43,6 +65,8 @@
   let redoStack = [];
   let pendingSnapshot = null;
   let renderVersion = 0;
+  let galleryIndex = 0;
+  const zoomState = { develop: { scale: 1, x: 0, y: 0 }, gallery: { scale: 1, x: 0, y: 0 } };
 
   function loadJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; } }
   function migrateRolls(items) {
@@ -89,7 +113,8 @@
 
   function escapeHtml(value = '') { return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char])); }
   function frameEdit(frame) { return { ...DEFAULT_EDIT, ...(frame?.edit || {}) }; }
-  function frameFilterCss(frame, stockId) {
+  function frameFilterCss(frame, stockId, forceStyle = false) {
+    if (!frame?.developed && !forceStyle) return 'none';
     const edit = frameEdit(frame);
     const stock = STOCKS[stockId] || STOCKS.portra400;
     const brightness = Math.max(.2, 1 + edit.exposure / 130);
@@ -102,6 +127,7 @@
   }
   function frameStyle(frame, stockId) {
     const edit = frameEdit(frame);
+    if (!frame?.developed) return '--frame-filter:none;--grain:0;--vignette:0;--halo:0';
     return `--frame-filter:${frameFilterCss(frame, stockId)};--grain:${edit.grain / 230};--vignette:${edit.vignette / 120};--halo:${edit.halation / 100}`;
   }
   function toast(message, type = 'success') {
@@ -165,11 +191,11 @@
     $('#current-index').textContent = String(activeFrame + 1).padStart(2, '0');
     const cards = await Promise.all(roll.frames.map(async (frame, index) => {
       const src = await mediaUrl(frame); const media = frame.type === 'video' ? `<video src="${src}" muted preload="metadata"></video>` : `<img src="${src}" alt="${escapeHtml(frame.name)}">`;
-      const badges = `${frame.rating ? `<b title="${frame.rating} 星">★${frame.rating}</b>` : ''}${frame.flagged ? '<b title="待处理">!</b>' : ''}`;
+      const badges = `${!frame.developed ? '<b class="original-badge" title="尚未套用风格">原</b>' : ''}${frame.rating ? `<b title="${frame.rating} 星">★${frame.rating}</b>` : ''}${frame.flagged ? '<b title="待处理">!</b>' : ''}`;
       return `<button class="film-frame ${index === activeFrame ? 'active' : ''} ${frame.developed ? '' : 'undeveloped'}" data-frame="${index}" style="${frameStyle(frame, roll.stock)}">${media}<span class="frame-badges">${badges}</span><span class="frame-no">${String(index + 1).padStart(2, '0')}A</span></button>`;
     }));
     if (version !== renderVersion) return;
-    $('#film-strip').innerHTML = cards.join(''); updateCanister();
+    $('#film-strip').innerHTML = `<span class="film-leader" aria-hidden="true"><i></i><b>135</b><small>FILM START</small></span>${cards.join('')}`; updateCanister();
     requestAnimationFrame(() => $('#film-strip .active')?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }));
   }
   async function renderContact(version) {
@@ -187,9 +213,21 @@
     const src = await mediaUrl(frame); if (version !== renderVersion) return;
     placeholder.hidden = true; media.hidden = false; media.className = `develop-media ${frame.developed ? '' : 'undeveloped'}`; media.style.cssText = frameStyle(frame, roll.stock);
     media.innerHTML = frame.type === 'video' ? `<video src="${src}" controls playsinline></video>` : `<img src="${src}" alt="${escapeHtml(frame.name)}">`;
-    if (!frame.developed) media.insertAdjacentHTML('beforeend', '<button class="reveal-btn" id="btn-reveal-frame">✦ 点击显影</button>');
-    $('#develop-name').textContent = `${String(activeFrame + 1).padStart(2, '0')}A · ${frame.name}`; renderRating();
+    if (!frame.developed) media.insertAdjacentHTML('beforeend', `<button class="reveal-btn" id="btn-reveal-frame">✦ 套用 ${currentStock().name} 风格</button>`);
+    $('#develop-name').textContent = `${String(activeFrame + 1).padStart(2, '0')}A · ${frame.name}`; renderRating(); applyZoom('develop');
   }
+  async function openGallery(index) {
+    const roll = activeRoll(); if (!roll?.frames[index]) return; activeFrame = index; galleryIndex = index; resetZoom('gallery'); $('#gallery').hidden = false; document.body.style.overflow = 'hidden'; await renderGallery();
+  }
+  async function renderGallery() {
+    const roll = activeRoll(); const frame = roll?.frames[galleryIndex]; if (!frame) return;
+    const src = await mediaUrl(frame); const media = $('#gallery-media'); media.className = `gallery-media ${frame.developed ? '' : 'original'}`; media.style.cssText = frameStyle(frame, roll.stock); media.innerHTML = frame.type === 'video' ? `<video src="${src}" controls playsinline></video>` : `<img src="${src}" alt="${escapeHtml(frame.name)}">`;
+    $('#gallery-roll').textContent = `${roll.name} · ${currentStock().name}`; $('#gallery-counter').textContent = `${String(galleryIndex + 1).padStart(2, '0')} / ${String(roll.frames.length).padStart(2, '0')}`; $('#gallery-original').textContent = frame.developed ? '查看原片' : `套用 ${currentStock().name}`;
+    const thumbs = await Promise.all(roll.frames.map(async (item, index) => { const thumb = await mediaUrl(item); const tag = item.type === 'video' ? `<video src="${thumb}" muted></video>` : `<img src="${thumb}" alt="">`; return `<button class="gallery-thumb ${index === galleryIndex ? 'active' : ''}" data-gallery-frame="${index}" style="${frameStyle(item, roll.stock)}">${tag}<span>${String(index + 1).padStart(2, '0')}</span></button>`; }));
+    $('#gallery-thumbs').innerHTML = thumbs.join(''); applyZoom('gallery'); requestAnimationFrame(() => $('#gallery-thumbs .active')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }));
+  }
+  function closeGallery() { $('#gallery').hidden = true; $('#gallery-media').innerHTML = ''; document.body.style.overflow = ''; }
+  function stepGallery(delta) { const roll = activeRoll(); if (!roll?.frames.length) return; galleryIndex = (galleryIndex + delta + roll.frames.length) % roll.frames.length; activeFrame = galleryIndex; resetZoom('gallery'); renderGallery(); }
   function renderRating() {
     const rating = activeItem()?.rating || 0;
     $('#develop-rating').innerHTML = [1, 2, 3, 4, 5].map(value => `<button data-rating="${value}" class="${value <= rating ? 'active' : ''}" aria-label="${value} 星">★</button>`).join('');
@@ -201,7 +239,7 @@
   }
   function renderInspector() {
     const roll = activeRoll(); const frame = activeItem();
-    $('#stock-picker').innerHTML = Object.entries(STOCKS).map(([id, stock]) => `<button class="stock-card ${roll?.stock === id ? 'active' : ''}" data-stock="${id}" style="--stock:${stock.color}"><i></i><b>${stock.name}</b><small>${stock.brand}</small></button>`).join('');
+    $('#stock-picker').innerHTML = Object.entries(STOCKS).filter(([, stock]) => styleKind === 'all' || stock.group === styleKind).map(([id, stock]) => `<button class="stock-card ${roll?.stock === id ? 'active' : ''}" data-stock="${id}" style="--stock:${stock.color}"><i></i><b>${stock.name}</b><small>${stock.brand}</small></button>`).join('');
     const edit = frameEdit(frame);
     $('#adjustment-list').innerHTML = ADJUSTMENTS.map(([key, label, min, max]) => `<div class="adjustment"><div><label for="adj-${key}">${label}</label><output id="out-${key}">${formatAdjustment(key, edit[key])}</output></div><input id="adj-${key}" data-adjustment="${key}" type="range" min="${min}" max="${max}" value="${edit[key]}" ${frame ? '' : 'disabled'}></div>`).join('');
     $('#develop-mode').checked = settings.developMode;
@@ -228,7 +266,26 @@
     else { selection.clear(); selection.add(frame.id); selectionAnchor = index; }
     activeFrame = index; renderSelectionState(); renderAll();
   }
-  function stepFrame(delta) { const frames = activeRoll()?.frames || []; if (!frames.length) return; activeFrame = (activeFrame + delta + frames.length) % frames.length; renderAll(); }
+  function stepFrame(delta) { const frames = activeRoll()?.frames || []; if (!frames.length) return; activeFrame = (activeFrame + delta + frames.length) % frames.length; resetZoom('develop'); renderAll(); }
+  function applyZoom(scope) {
+    const state = zoomState[scope]; const media = $(`#${scope === 'develop' ? 'develop' : 'gallery'}-media`); const target = media?.querySelector('img,video'); if (!target) return;
+    target.style.transform = `translate3d(${state.x}px,${state.y}px,0) scale(${state.scale})`; target.style.transformOrigin = 'center'; media.classList.toggle('zoomed', state.scale > 1.01); const output = $(`#${scope}-zoom output`); if (output) output.textContent = `${Math.round(state.scale * 100)}%`;
+  }
+  function resetZoom(scope) { zoomState[scope] = { scale: 1, x: 0, y: 0 }; applyZoom(scope); }
+  function changeZoom(scope, direction, clientX, clientY) {
+    const state = zoomState[scope]; const old = state.scale; state.scale = direction === 'fit' ? 1 : Math.max(.5, Math.min(6, state.scale * (direction === 'in' ? 1.18 : .85)));
+    if (state.scale <= 1) { state.x = 0; state.y = 0; } else if (clientX != null && old > 0) { const ratio = state.scale / old; state.x *= ratio; state.y *= ratio; }
+    applyZoom(scope);
+  }
+  function setupPanZoom(scope, stageSelector, toolbarSelector) {
+    const stage = $(stageSelector); let pan = null;
+    stage.addEventListener('wheel', event => { if (!event.target.closest('img,video')) return; event.preventDefault(); changeZoom(scope, event.deltaY < 0 ? 'in' : 'out', event.clientX, event.clientY); }, { passive: false });
+    stage.addEventListener('pointerdown', event => { if (!event.target.closest('img,video') || zoomState[scope].scale <= 1) return; pan = { x: event.clientX, y: event.clientY, ox: zoomState[scope].x, oy: zoomState[scope].y }; stage.setPointerCapture(event.pointerId); stage.classList.add('panning'); });
+    stage.addEventListener('pointermove', event => { if (!pan) return; zoomState[scope].x = pan.ox + event.clientX - pan.x; zoomState[scope].y = pan.oy + event.clientY - pan.y; applyZoom(scope); });
+    stage.addEventListener('pointerup', () => { pan = null; stage.classList.remove('panning'); }); stage.addEventListener('pointercancel', () => { pan = null; stage.classList.remove('panning'); });
+    stage.addEventListener('dblclick', event => { if (event.target.closest('img,video')) resetZoom(scope); });
+    $(toolbarSelector).onclick = event => { const button = event.target.closest('[data-zoom]'); if (button) changeZoom(scope, button.dataset.zoom); };
+  }
   function setRating(value) { const frame = activeItem(); if (!frame) return; checkpoint(); frame.rating = frame.rating === value ? 0 : value; save(); renderAll(); }
   function setStock(id) { const roll = activeRoll(); if (!roll || roll.stock === id) return; checkpoint(); roll.stock = id; save(); renderAll(); }
   function editSelectedFrames(mutator) { const roll = activeRoll(); if (!roll) return 0; const targets = selection.size ? roll.frames.filter(frame => selection.has(frame.id)) : [activeItem()].filter(Boolean); if (!targets.length) return 0; checkpoint(); targets.forEach(mutator); save(); renderAll(); return targets.length; }
@@ -319,12 +376,14 @@
     $('#grid-size').oninput = event => $('#contact-grid').style.setProperty('--thumb', `${event.target.value}px`);
     $('#btn-prev').onclick = $('#develop-prev').onclick = () => stepFrame(-1); $('#btn-next').onclick = $('#develop-next').onclick = () => stepFrame(1);
     $('#pull-range').oninput = event => { const amount = Number(event.target.value); $('#film-strip').style.transform = `translateX(${(100 - amount) * .42}%)`; $('#film-strip').style.opacity = String(.55 + amount * .0045); };
-    $('#film-strip').onclick = event => { const card = event.target.closest('[data-frame]'); if (!card) return; activeFrame = Number(card.dataset.frame); renderAll(); };
-    $('#film-strip').ondblclick = event => { const card = event.target.closest('[data-frame]'); if (!card) return; activeFrame = Number(card.dataset.frame); switchView('develop'); };
+    let suppressFilmClick = false;
+    $('#film-strip').onclick = event => { if (suppressFilmClick) return; const card = event.target.closest('[data-frame]'); if (!card) return; const index = Number(card.dataset.frame); if (index === activeFrame) { openGallery(index); return; } activeFrame = index; renderAll(); };
+    $('#film-strip').ondblclick = event => { const card = event.target.closest('[data-frame]'); if (!card) return; openGallery(Number(card.dataset.frame)); };
     $('#contact-grid').onclick = event => { const card = event.target.closest('[data-contact-frame]'); if (card) selectFrame(Number(card.dataset.contactFrame), event); };
-    $('#contact-grid').ondblclick = event => { const card = event.target.closest('[data-contact-frame]'); if (!card) return; activeFrame = Number(card.dataset.contactFrame); switchView('develop'); };
-    let stripDrag = null; const scroll = $('#film-scroll'); scroll.onpointerdown = event => { if (event.button !== 0) return; stripDrag = { x: event.clientX, scroll: scroll.scrollLeft, moved: false }; scroll.setPointerCapture(event.pointerId); scroll.classList.add('dragging'); }; scroll.onpointermove = event => { if (!stripDrag) return; const delta = event.clientX - stripDrag.x; if (Math.abs(delta) > 4) stripDrag.moved = true; scroll.scrollLeft = stripDrag.scroll - delta; }; scroll.onpointerup = scroll.onpointercancel = () => { stripDrag = null; scroll.classList.remove('dragging'); };
+    $('#contact-grid').ondblclick = event => { const card = event.target.closest('[data-contact-frame]'); if (!card) return; openGallery(Number(card.dataset.contactFrame)); };
+    let stripDrag = null; const scroll = $('#film-scroll'); scroll.onpointerdown = event => { if (event.button !== 0) return; stripDrag = { x: event.clientX, scroll: scroll.scrollLeft, moved: false, pointerId: event.pointerId }; }; scroll.onpointermove = event => { if (!stripDrag) return; const delta = event.clientX - stripDrag.x; if (Math.abs(delta) > 4 && !stripDrag.moved) { stripDrag.moved = true; scroll.setPointerCapture?.(event.pointerId); scroll.classList.add('dragging'); } if (stripDrag.moved) scroll.scrollLeft = stripDrag.scroll - delta; }; scroll.onpointerup = scroll.onpointercancel = () => { suppressFilmClick = Boolean(stripDrag?.moved); if (suppressFilmClick) setTimeout(() => suppressFilmClick = false, 0); stripDrag = null; scroll.classList.remove('dragging'); };
     $('#stock-picker').onclick = event => { const card = event.target.closest('[data-stock]'); if (card) setStock(card.dataset.stock); };
+    $('#style-filter').onclick = event => { const button = event.target.closest('[data-style-kind]'); if (!button) return; styleKind = button.dataset.styleKind; $$('[data-style-kind]').forEach(node => node.classList.toggle('active', node === button)); renderInspector(); };
     $('#adjustment-list').onpointerdown = event => { if (event.target.matches('[data-adjustment]')) beginContinuousEdit(); };
     $('#adjustment-list').oninput = event => { const input = event.target.closest('[data-adjustment]'); const frame = activeItem(); if (!input || !frame) return; if (!pendingSnapshot) beginContinuousEdit(); frame.edit[input.dataset.adjustment] = Number(input.value); $(`#out-${input.dataset.adjustment}`).textContent = formatAdjustment(input.dataset.adjustment, Number(input.value)); save(); if (currentView === 'develop') renderDevelop(++renderVersion); else if (currentView === 'film') renderFilm(++renderVersion); };
     $('#adjustment-list').onchange = finishContinuousEdit;
@@ -334,7 +393,7 @@
     $('#btn-sync-look').onclick = () => { const source = activeItem(); if (!source || !selection.size) return toast('请先在接触印样中选择目标', 'warning'); const count = editSelectedFrames(frame => frame.edit = clone(source.edit)); toast(`已同步到 ${count} 格影像`); };
     $('#develop-mode').onchange = event => { settings.developMode = event.target.checked; save(); };
     $('#develop-rating').onclick = event => { const button = event.target.closest('[data-rating]'); if (button) setRating(Number(button.dataset.rating)); };
-    $('#develop-media').onclick = event => { if (!event.target.closest('#btn-reveal-frame')) return; const frame = activeItem(); if (!frame) return; checkpoint(); frame.developed = true; save(); renderAll(); toast('显影完成'); };
+    $('#develop-media').onclick = event => { if (!event.target.closest('#btn-reveal-frame')) return; const frame = activeItem(); if (!frame) return; checkpoint(); frame.developed = true; save(); renderAll(); toast(`${currentStock().name} 风格已应用`); };
     const beforeAfter = $('#btn-before-after'); beforeAfter.onpointerdown = () => $('#develop-media').classList.add('original'); beforeAfter.onpointerup = beforeAfter.onpointercancel = beforeAfter.onpointerleave = () => $('#develop-media').classList.remove('original');
     $('#btn-export-frame').onclick = exportCurrentFrame;
     for (const [id, key] of [['meta-name', 'name'], ['meta-format', 'format'], ['meta-status', 'status'], ['meta-camera', 'camera'], ['meta-lens', 'lens'], ['meta-location', 'location'], ['meta-date', 'date'], ['meta-process', 'process'], ['meta-notes', 'notes']]) $('#'+id).onchange = event => { const roll = activeRoll(); if (!roll) return; checkpoint(); roll[key] = event.target.value; save(); renderAll(); };
@@ -342,17 +401,21 @@
     $('#btn-clear-selection').onclick = () => { selection.clear(); renderAll(); };
     $('#btn-rate-selected').onclick = () => { const count = editSelectedFrames(frame => frame.rating = 5); toast(`${count} 格已设为精选`); };
     $('#btn-flag-selected').onclick = () => { const count = editSelectedFrames(frame => frame.flagged = true); toast(`${count} 格已标记`); };
-    $('#btn-develop-selected').onclick = () => { const count = editSelectedFrames(frame => frame.developed = true); toast(`${count} 格已显影`); };
+    $('#btn-develop-selected').onclick = () => { const count = editSelectedFrames(frame => frame.developed = true); toast(`${count} 格已套用当前风格`); };
     $('#btn-run-analysis').onclick = analyzeCurrentRoll; $('#btn-ai-select').onclick = smartSelect;
     $('#btn-stage-more').onclick = () => { switchInspector('selection'); if (matchMedia('(max-width:820px)').matches) $('.inspector-panel').classList.add('mobile-show'); };
     $('#brand-home').onclick = () => switchView('film');
     $('#btn-undo').onclick = undo; $('#btn-redo').onclick = redo;
     $('#btn-fullscreen').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    setupPanZoom('develop', '#develop-canvas', '#develop-zoom'); setupPanZoom('gallery', '#gallery-stage', '#gallery-zoom');
+    $('#gallery-close').onclick = closeGallery; $('#gallery-prev').onclick = () => stepGallery(-1); $('#gallery-next').onclick = () => stepGallery(1);
+    $('#gallery-thumbs').onclick = event => { const thumb = event.target.closest('[data-gallery-frame]'); if (!thumb) return; galleryIndex = Number(thumb.dataset.galleryFrame); activeFrame = galleryIndex; resetZoom('gallery'); renderGallery(); };
+    $('#gallery-original').onclick = () => { const frame = activeRoll()?.frames[galleryIndex]; if (!frame) return; if (!frame.developed) { checkpoint(); frame.developed = true; save(); renderGallery(); renderAll(); toast(`${currentStock().name} 风格已应用`); } else { const media = $('#gallery-media'); media.classList.toggle('original'); $('#gallery-original').textContent = media.classList.contains('original') ? '返回胶卷风格' : '查看原片'; } };
     $('#btn-project').onclick = event => { event.stopPropagation(); $('#project-menu').hidden = !$('#project-menu').hidden; };
     $('#btn-export-project').onclick = exportProject; $('#btn-export-contact').onclick = exportContactSheet; $('#btn-export-catalog').onclick = exportCatalog; $('#btn-import-project').onclick = () => $('#project-input').click(); $('#project-input').onchange = event => { if (event.target.files[0]) importProject(event.target.files[0]); event.target.value = ''; };
     document.addEventListener('click', event => { if (!event.target.closest('#project-menu') && !event.target.closest('#btn-project')) $('#project-menu').hidden = true; });
     let dragDepth = 0; document.addEventListener('dragenter', event => { if (![...event.dataTransfer.types].includes('Files')) return; event.preventDefault(); dragDepth++; $('#drop-overlay').classList.add('show'); }); document.addEventListener('dragover', event => event.preventDefault()); document.addEventListener('dragleave', () => { dragDepth--; if (dragDepth <= 0) { dragDepth = 0; $('#drop-overlay').classList.remove('show'); } }); document.addEventListener('drop', event => { event.preventDefault(); dragDepth = 0; $('#drop-overlay').classList.remove('show'); addFiles(event.dataTransfer.files); });
-    document.addEventListener('keydown', event => { const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName); if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; } if (typing) return; if (event.key === 'ArrowLeft') stepFrame(-1); if (event.key === 'ArrowRight') stepFrame(1); if (event.key === '1') switchView('film'); if (event.key === '2') switchView('contact'); if (event.key === '3') switchView('develop'); });
+    document.addEventListener('keydown', event => { const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName); if (event.key === 'Escape' && !$('#gallery').hidden) { closeGallery(); return; } if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; } if (typing) return; const galleryOpen = !$('#gallery').hidden; if (event.key === 'ArrowLeft') galleryOpen ? stepGallery(-1) : stepFrame(-1); if (event.key === 'ArrowRight') galleryOpen ? stepGallery(1) : stepFrame(1); if (galleryOpen) return; if (event.key === '1') switchView('film'); if (event.key === '2') switchView('contact'); if (event.key === '3') switchView('develop'); });
     $$('[data-mobile-view]').forEach(button => button.onclick = () => { $('.library-panel').classList.remove('mobile-show'); $('.inspector-panel').classList.remove('mobile-show'); switchView(button.dataset.mobileView); });
     $$('[data-mobile]').forEach(button => button.onclick = () => { const panel = button.dataset.mobile === 'library' ? $('.library-panel') : $('.inspector-panel'); const show = !panel.classList.contains('mobile-show'); $$('.panel').forEach(item => item.classList.remove('mobile-show')); panel.classList.toggle('mobile-show', show); });
   }
