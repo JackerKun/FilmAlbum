@@ -67,6 +67,8 @@
   let pendingSnapshot = null;
   let renderVersion = 0;
   let galleryIndex = 0;
+  let pendingImport = false;
+  let pendingFiles = null;
   const zoomState = { develop: { scale: 1, x: 0, y: 0 }, gallery: { scale: 1, x: 0, y: 0 } };
 
   function loadJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; } }
@@ -157,7 +159,10 @@
   async function addFiles(fileList) {
     const files = [...fileList].filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'));
     if (!files.length) return toast('未检测到可用的照片或视频', 'warning');
-    if (!activeRoll()) createRoll({ name: '第一卷' });
+    if (!activeRoll()) {
+      pendingImport = true; pendingFiles = files; $('#new-roll-submit').textContent = '创建并装入影像'; renderNewRollPicker(); $('#new-roll-dialog').showModal();
+      return toast('请先选择画幅与胶片类型');
+    }
     checkpoint();
     const roll = activeRoll();
     for (const file of files) {
@@ -165,6 +170,10 @@
       await dbPut(frame.id, file); roll.frames.push(frame);
     }
     activeFrame = Math.max(0, roll.frames.length - files.length); save(); await renderAll(); toast(`已装入 ${files.length} 格影像`);
+  }
+  function requestImport() {
+    if (activeRoll()) return $('#file-input').click();
+    pendingImport = true; pendingFiles = null; $('#new-roll-submit').textContent = '创建并选择影像'; renderNewRollPicker(); $('#new-roll-dialog').showModal();
   }
 
   async function renderAll() {
@@ -295,12 +304,13 @@
   }
   function resetZoom(scope) { zoomState[scope] = { scale: 1, x: 0, y: 0 }; applyZoom(scope); }
   function changeZoom(scope, direction, clientX, clientY) {
-    const state = zoomState[scope]; const old = state.scale; state.scale = direction === 'fit' ? 1 : Math.max(.5, Math.min(6, state.scale * (direction === 'in' ? 1.18 : .85)));
+    const state = zoomState[scope]; const old = state.scale; state.scale = direction === 'fit' ? 1 : Math.max(1, Math.min(6, state.scale * (direction === 'in' ? 1.18 : .85)));
     if (state.scale <= 1) { state.x = 0; state.y = 0; }
     else {
-      const ratio = state.scale / old; const stage = $(`#${scope === 'develop' ? 'develop-canvas' : 'gallery-stage'}`);
-      if (Number.isFinite(clientX) && Number.isFinite(clientY) && stage) {
-        const rect = stage.getBoundingClientRect(); const anchorX = clientX - rect.left - rect.width / 2; const anchorY = clientY - rect.top - rect.height / 2;
+      const ratio = state.scale / old; const stage = $(`#${scope === 'develop' ? 'develop-canvas' : 'gallery-stage'}`); const media = stage?.querySelector('.develop-media,.gallery-media');
+      if (stage) {
+        const rect = media?.getBoundingClientRect() || stage.getBoundingClientRect(); const pointerInside = Number.isFinite(clientX) && Number.isFinite(clientY) && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+        const anchorX = pointerInside ? clientX - rect.left - rect.width / 2 : 0; const anchorY = pointerInside ? clientY - rect.top - rect.height / 2 : 0;
         state.x = anchorX - (anchorX - state.x) * ratio; state.y = anchorY - (anchorY - state.y) * ratio;
       } else { state.x *= ratio; state.y *= ratio; }
     }
@@ -308,7 +318,7 @@
   }
   function setupPanZoom(scope, stageSelector, toolbarSelector) {
     const stage = $(stageSelector); let pan = null;
-    stage.addEventListener('wheel', event => { if (!event.target.closest('img,video')) return; event.preventDefault(); changeZoom(scope, event.deltaY < 0 ? 'in' : 'out', event.clientX, event.clientY); }, { passive: false });
+    stage.addEventListener('wheel', event => { if (!event.target.closest('.develop-media,.gallery-media')) return; event.preventDefault(); changeZoom(scope, event.deltaY < 0 ? 'in' : 'out', event.clientX, event.clientY); }, { passive: false });
     stage.addEventListener('pointerdown', event => { if (event.button !== 0 || event.target.closest('button') || !event.target.closest('.develop-media,.gallery-media') || zoomState[scope].scale <= 1) return; pan = { x: event.clientX, y: event.clientY, ox: zoomState[scope].x, oy: zoomState[scope].y }; stage.setPointerCapture(event.pointerId); stage.classList.add('panning'); event.preventDefault(); });
     stage.addEventListener('pointermove', event => { if (!pan) return; zoomState[scope].x = pan.ox + event.clientX - pan.x; zoomState[scope].y = pan.oy + event.clientY - pan.y; applyZoom(scope); });
     stage.addEventListener('pointerup', () => { pan = null; stage.classList.remove('panning'); }); stage.addEventListener('pointercancel', () => { pan = null; stage.classList.remove('panning'); });
@@ -393,10 +403,11 @@
   function bind() {
     $$('[data-view]').forEach(button => button.onclick = () => switchView(button.dataset.view));
     $$('[data-inspector]').forEach(button => button.onclick = () => switchInspector(button.dataset.inspector));
-    $('#btn-import').onclick = $('#btn-empty-import').onclick = () => $('#file-input').click();
+    $('#btn-import').onclick = $('#btn-empty-import').onclick = requestImport;
     $('#file-input').onchange = event => { addFiles(event.target.files); event.target.value = ''; };
-    $('#btn-new-roll').onclick = () => { renderNewRollPicker(); $('#new-roll-dialog').showModal(); };
-    $('#new-roll-form').onsubmit = event => { if (event.submitter?.value === 'cancel') return; checkpoint(); createRoll({ name: $('#new-roll-name').value.trim() || '未命名胶卷', stock: $('#new-roll-stock').value, format: $('#new-roll-format').value, camera: $('#new-roll-camera').value.trim() }); toast('新胶卷已创建'); };
+    $('#btn-new-roll').onclick = () => { pendingImport = false; pendingFiles = null; $('#new-roll-submit').textContent = '创建胶卷'; renderNewRollPicker(); $('#new-roll-dialog').showModal(); };
+    $('#new-roll-form').onsubmit = event => { if (event.submitter?.value === 'cancel') return; const shouldImport = pendingImport; const queuedFiles = pendingFiles; pendingImport = false; pendingFiles = null; checkpoint(); createRoll({ name: $('#new-roll-name').value.trim() || '未命名胶卷', stock: $('#new-roll-stock').value, format: $('#new-roll-format').value, camera: $('#new-roll-camera').value.trim() }); toast('新胶卷已创建'); if (queuedFiles?.length) addFiles(queuedFiles); else if (shouldImport) $('#file-input').click(); };
+    $('#new-roll-dialog').addEventListener('close', () => { if ($('#new-roll-dialog').returnValue === 'cancel') { pendingImport = false; pendingFiles = null; } $('#new-roll-submit').textContent = '创建胶卷'; });
     $('#new-roll-format').onchange = renderNewRollPicker;
     $('#new-roll-style-filter').onclick = event => { const button = event.target.closest('[data-new-style-kind]'); if (!button) return; newRollStyleKind = button.dataset.newStyleKind; $$('[data-new-style-kind]').forEach(node => node.classList.toggle('active', node === button)); renderNewRollPicker(); };
     $('#new-roll-stock-grid').onclick = event => { const card = event.target.closest('[data-new-stock]'); if (!card) return; $('#new-roll-stock').value = card.dataset.newStock; renderNewRollPicker(); };
