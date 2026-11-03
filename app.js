@@ -37,7 +37,6 @@
   const $ = selector => document.querySelector(selector);
   const $$ = selector => [...document.querySelectorAll(selector)];
   const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
-  const clone = value => JSON.parse(JSON.stringify(value));
 
   let rolls = [];
   let settings = {};
@@ -51,8 +50,6 @@
   let selection = new Set();
   let selectionAnchor = null;
   let saveTimer;
-  let undoStack = [];
-  let redoStack = [];
   let renderVersion = 0;
   let galleryIndex = 0;
   let pendingImport = false;
@@ -78,12 +75,6 @@
   }
   function activeRoll() { return rolls.find(roll => roll.id === activeRollId) || rolls[0] || null; }
   function activeItem() { return activeRoll()?.frames[activeFrame] || null; }
-  function snapshot() { return { rolls: clone(rolls), activeRollId, activeFrame }; }
-  function restore(state) { rolls = state.rolls; activeRollId = state.activeRollId; activeFrame = state.activeFrame; selection.clear(); save(); renderAll(); }
-  function checkpoint() { undoStack.push(snapshot()); if (undoStack.length > 40) undoStack.shift(); redoStack = []; updateHistoryButtons(); }
-  function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); restore(undoStack.pop()); updateHistoryButtons(); toast('已撤销'); }
-  function redo() { if (!redoStack.length) return; undoStack.push(snapshot()); restore(redoStack.pop()); updateHistoryButtons(); toast('已重做'); }
-  function updateHistoryButtons() { $('#btn-undo').disabled = !undoStack.length; $('#btn-redo').disabled = !redoStack.length; }
 
   async function dbPut(id, blob) { const response = await fetch(`/api/media/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob }); if (!response.ok) throw new Error('媒体写入失败'); }
   async function dbGet(id) { const response = await fetch(`/api/media/${encodeURIComponent(id)}`); return response.ok ? response.blob() : null; }
@@ -173,7 +164,6 @@
       pendingImport = true; pendingFiles = files; $('#new-roll-submit').textContent = '创建并装入影像'; renderNewRollPicker(); $('#new-roll-dialog').showModal();
       return toast('请先选择画幅与胶片类型');
     }
-    checkpoint();
     const roll = activeRoll();
     for (const file of files) {
       const frame = { id: uid(), name: file.name, type: file.type.startsWith('video/') ? 'video' : 'image', developed: true, createdAt: Date.now(), rating: 0, flagged: false, color: '', tags: [], exif: await extractExif(file), edit: { ...DEFAULT_EDIT } };
@@ -192,7 +182,12 @@
     if (currentView === 'film') await renderFilm(version);
     if (currentView === 'contact') await renderContact(version);
     if (currentView === 'develop') await renderDevelop(version);
-    updateHistoryButtons();
+  }
+  function libraryRollIcon(roll, stock) {
+    const medium = is120(roll.format);
+    const format = medium ? roll.format.replace(/^120\s*·\s*/, '') : '135';
+    const label = escapeHtml(stock.name.replace(/\s+/g, ' '));
+    return `<span class="library-film-icon ${medium ? 'library-film-120' : 'library-film-135'}" style="--stock:${stock.color};--stock2:${stock.color2}" aria-hidden="true"><i class="library-film-core"></i><span class="library-film-label"><small>${escapeHtml(stock.brand)}</small><b>${label}</b></span><em>${escapeHtml(format)}</em></span>`;
   }
   function renderRollList() {
     const query = $('#roll-search').value.trim().toLowerCase();
@@ -203,7 +198,7 @@
     });
     $('#roll-list').innerHTML = items.map(roll => {
       const stock = STOCKS[roll.stock] || STOCKS.portra400;
-      return `<button class="roll-card ${roll.id === activeRollId ? 'active' : ''}" data-roll="${roll.id}"><span class="mini-roll" style="--stock:${stock.color};--stock2:${stock.color2}"><i></i></span><span><strong>${escapeHtml(roll.name)}</strong><small>${stock.name} · ${roll.frames.length} 格 · ${STATUS[roll.status]}</small></span><em>${new Date(roll.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })}</em></button>`;
+      return `<button class="roll-card ${roll.id === activeRollId ? 'active' : ''}" data-roll="${roll.id}">${libraryRollIcon(roll, stock)}<span class="roll-card-copy"><strong>${escapeHtml(roll.name)}</strong><small>${escapeHtml(stock.brand)} · ${escapeHtml(stock.name)}</small><span class="roll-card-tags"><i>${escapeHtml(roll.format)}</i><i>${roll.frames.length} 格</i><i>${STATUS[roll.status]}</i></span></span><em>${new Date(roll.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })}</em></button>`;
     }).join('') || '<div class="empty-list">没有匹配的胶卷</div>';
     $('#storage-count').textContent = rolls.length;
     $('#storage-bar').style.width = `${Math.min(100, 8 + rolls.reduce((sum, roll) => sum + roll.frames.length, 0) * 1.5)}%`;
@@ -238,7 +233,18 @@
       const src = await mediaUrl(frame); const media = frame.type === 'video' ? `<video src="${src}" muted preload="metadata"></video>` : `<img src="${src}" alt="${escapeHtml(frame.name)}">`;
       return `<button class="contact-card ${selection.has(frame.id) ? 'selected' : ''} ${frame.developed ? '' : 'undeveloped'}" data-contact-frame="${index}" style="${frameStyle(frame, roll.stock)}"><span class="contact-thumb">${media}</span>${frame.analysis ? `<span class="contact-score">${frame.analysis.score}</span>` : ''}<span class="contact-meta"><span>${String(index + 1).padStart(2, '0')}A</span><b>${frame.rating ? '★'.repeat(frame.rating) : 'UNRATED'}</b></span></button>`;
     }));
-    if (version !== renderVersion) return; $('#contact-grid').innerHTML = cards.join('');
+    if (version !== renderVersion) return; $('#contact-grid').innerHTML = cards.join(''); layoutContactGrid();
+  }
+  let contactLayoutFrame = 0;
+  function layoutContactGrid() {
+    cancelAnimationFrame(contactLayoutFrame);
+    contactLayoutFrame = requestAnimationFrame(() => {
+      const grid = $('#contact-grid');
+      const styles = getComputedStyle(grid); const rowHeight = parseFloat(styles.gridAutoRows) || 8; const gap = parseFloat(styles.rowGap) || 12;
+      const cards = [...grid.querySelectorAll('.contact-card')];
+      cards.forEach(card => { card.style.gridRowEnd = 'auto'; });
+      cards.forEach(card => { const span = Math.ceil((card.getBoundingClientRect().height + gap) / (rowHeight + gap)); card.style.gridRowEnd = `span ${Math.max(1, span)}`; });
+    });
   }
   async function renderDevelop(version) {
     const roll = activeRoll(); const frame = activeItem(); const placeholder = $('#develop-placeholder'); const media = $('#develop-media');
@@ -332,39 +338,7 @@
     stage.addEventListener('dblclick', event => { if (event.target.closest('img,video')) resetZoom(scope); });
     $(toolbarSelector).onclick = event => { const button = event.target.closest('[data-zoom]'); if (button) changeZoom(scope, button.dataset.zoom); };
   }
-  function setRating(value) { const frame = activeItem(); if (!frame) return; checkpoint(); frame.rating = frame.rating === value ? 0 : value; save(); renderAll(); }
-
-  async function exportProject() {
-    if (!rolls.length) return toast('没有可导出的胶卷', 'warning');
-    toast('正在整理完整项目，请稍候'); const media = {};
-    for (const roll of rolls) for (const frame of roll.frames) { const blob = await dbGet(frame.id); if (blob) media[frame.id] = await blobToDataUrl(blob); }
-    const project = { format: 'filmalbum-project', version: 2, exportedAt: new Date().toISOString(), rolls, settings, media };
-    downloadBlob(new Blob([JSON.stringify(project)], { type: 'application/json' }), `FilmAlbum-${new Date().toISOString().slice(0, 10)}.filmalbum`); toast('完整项目已导出');
-  }
-  function exportCatalog() { const data = { format: 'filmalbum-catalog', version: 2, exportedAt: new Date().toISOString(), rolls, settings }; downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `FilmAlbum-catalog-${new Date().toISOString().slice(0, 10)}.json`); }
-  async function exportContactSheet() {
-    const roll = activeRoll(); const frames = roll?.frames.filter(frame => frame.type === 'image') || [];
-    if (!frames.length) return toast('当前胶卷没有可输出的照片', 'warning');
-    toast('正在生成高清接触印样');
-    const columns = frames.length <= 6 ? 3 : 4; const cellW = 430; const cellH = 330; const headerH = 150; const rows = Math.ceil(frames.length / columns);
-    const canvas = document.createElement('canvas'); canvas.width = columns * cellW + 80; canvas.height = rows * cellH + headerH + 50; const context = canvas.getContext('2d');
-    context.fillStyle = '#171714'; context.fillRect(0, 0, canvas.width, canvas.height); context.fillStyle = '#f4f0e5'; context.font = '600 38px Georgia'; context.fillText(roll.name, 40, 58); context.fillStyle = '#a9a398'; context.font = '18px monospace'; context.fillText(`${roll.format}  ·  ${currentStock().brand} ${currentStock().name}  ·  ${frames.length} FRAMES`, 40, 96);
-    for (let index = 0; index < frames.length; index++) {
-      const frame = frames[index]; const blob = await dbGet(frame.id); if (!blob) continue; const decoded = await decodeImageBlob(blob); const column = index % columns; const row = Math.floor(index / columns); const x = 40 + column * cellW; const y = headerH + row * cellH; const drawW = cellW - 24; const drawH = cellH - 58; const scale = Math.max(drawW / decoded.width, drawH / decoded.height); const sourceW = drawW / scale; const sourceH = drawH / scale; const sourceX = (decoded.width - sourceW) / 2; const sourceY = (decoded.height - sourceH) / 2;
-      context.save(); context.filter = frameFilterCss(frame, roll.stock); context.drawImage(decoded.image, sourceX, sourceY, sourceW, sourceH, x, y, drawW, drawH); context.restore(); decoded.dispose(); context.fillStyle = '#d6cebc'; context.font = '15px monospace'; context.fillText(`${String(index + 1).padStart(2, '0')}A`, x, y + drawH + 25); if (frame.rating) { context.fillStyle = '#e3b849'; context.fillText('★'.repeat(frame.rating), x + 55, y + drawH + 25); }
-    }
-    canvas.toBlob(blob => { downloadBlob(blob, `${roll.name}-接触印样.jpg`); toast('接触印样已导出'); }, 'image/jpeg', .94);
-  }
-  async function importProject(file) {
-    let project; try { project = JSON.parse(await file.text()); } catch { return toast('无法读取这个项目文件', 'warning'); }
-    if (project.format !== 'filmalbum-project' || !Array.isArray(project.rolls)) return toast('不是有效的 FilmAlbum 完整项目', 'warning');
-    if (rolls.length && !confirm('导入会替换当前工作区。建议先导出当前项目，是否继续？')) return;
-    toast('正在恢复媒体与编辑记录');
-    for (const [id, dataUrl] of Object.entries(project.media || {})) await dbPut(id, dataUrlToBlob(dataUrl));
-    rolls = migrateRolls(project.rolls); settings = project.settings || {}; activeRollId = rolls[0]?.id || null; activeFrame = 0; selection.clear(); save(); await renderAll(); toast(`已恢复 ${rolls.length} 卷胶片`);
-  }
-  function blobToDataUrl(blob) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(blob); }); }
-  function dataUrlToBlob(dataUrl) { const [header, data] = dataUrl.split(','); const mime = header.match(/data:(.*?);/)?.[1] || 'application/octet-stream'; const binary = atob(data); const bytes = new Uint8Array(binary.length); for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i); return new Blob([bytes], { type: mime }); }
+  function setRating(value) { const frame = activeItem(); if (!frame) return; frame.rating = frame.rating === value ? 0 : value; save(); renderAll(); }
 
   async function exportCurrentFrame() {
     const roll = activeRoll(); const frame = activeItem(); if (!roll || !frame || frame.type !== 'image') return toast('当前帧无法导出为照片', 'warning');
@@ -372,7 +346,7 @@
     canvas.toBlob(output => downloadBlob(output, `FilmAlbum-${frame.name.replace(/\.[^.]+$/, '')}.jpg`), 'image/jpeg', .94);
   }
   async function loadDemo() {
-    checkpoint(); const roll = createRoll({ name: '东京雨夜 · 36', stock: 'cinestill800t', format: '135', camera: 'Leica M6' }); roll.location = 'Tokyo · Shinjuku'; roll.date = new Date().toISOString().slice(0, 10); roll.status = 'developing';
+    const roll = createRoll({ name: '东京雨夜 · 36', stock: 'cinestill800t', format: '135', camera: 'Leica M6' }); roll.location = 'Tokyo · Shinjuku'; roll.date = new Date().toISOString().slice(0, 10); roll.status = 'developing';
     const palettes = [['#071b2a','#ec4c3d'],['#192947','#dd9c50'],['#19201c','#50ad9f'],['#291d35','#bd3f59'],['#0a2630','#e2c07d'],['#231d28','#6894ad'],['#102c34','#d74f42'],['#271e1c','#c6a45c']];
     for (let index = 0; index < palettes.length; index++) { const [a, b] = palettes[index]; const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="930"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient><filter id="n"><feTurbulence baseFrequency=".8" numOctaves="3" stitchTiles="stitch"/><feBlend mode="soft-light" in="SourceGraphic"/></filter></defs><rect width="1400" height="930" fill="url(#g)"/><g opacity=".75"><circle cx="${220 + index * 126}" cy="${170 + index % 3 * 210}" r="${80 + index * 10}" fill="#ffd58a"/><rect x="${700 - index * 47}" y="120" width="240" height="650" rx="15" fill="#12202a"/><path d="M0 ${650 - index * 12} Q350 ${430 + index * 17} 720 ${690 - index * 22} T1400 590V930H0Z" fill="#070808"/></g><rect width="1400" height="930" filter="url(#n)" opacity=".16"/><text x="60" y="870" font-family="monospace" font-size="30" fill="white" opacity=".7">TOKYO / FRAME ${String(index + 1).padStart(2, '0')}</text></svg>`; const id = uid(); await dbPut(id, new Blob([svg], { type: 'image/svg+xml' })); roll.frames.push({ id, name: `Tokyo-${String(index + 1).padStart(2, '0')}.svg`, type: 'image', developed: index < 3, createdAt: Date.now(), rating: index === 1 ? 5 : index === 4 ? 4 : 0, flagged: index === 6, color: '', tags: [], edit: { ...DEFAULT_EDIT, exposure: index % 2 ? 5 : -3, grain: 30 } }); }
     save(); await renderAll(); toast('演示胶卷已装入');
@@ -384,7 +358,7 @@
     $('#btn-import').onclick = $('#btn-empty-import').onclick = requestImport;
     $('#file-input').onchange = event => { addFiles(event.target.files); event.target.value = ''; };
     $('#btn-new-roll').onclick = () => { pendingImport = false; pendingFiles = null; $('#new-roll-submit').textContent = '创建胶卷'; renderNewRollPicker(); $('#new-roll-dialog').showModal(); };
-    $('#new-roll-form').onsubmit = event => { if (event.submitter?.value === 'cancel') return; const shouldImport = pendingImport; const queuedFiles = pendingFiles; pendingImport = false; pendingFiles = null; checkpoint(); createRoll({ name: $('#new-roll-name').value.trim() || '未命名胶卷', stock: $('#new-roll-stock').value, format: $('#new-roll-format').value, camera: $('#new-roll-camera').value.trim() }); toast('新胶卷已创建'); if (queuedFiles?.length) addFiles(queuedFiles); else if (shouldImport) $('#file-input').click(); };
+    $('#new-roll-form').onsubmit = event => { if (event.submitter?.value === 'cancel') return; const shouldImport = pendingImport; const queuedFiles = pendingFiles; pendingImport = false; pendingFiles = null; createRoll({ name: $('#new-roll-name').value.trim() || '未命名胶卷', stock: $('#new-roll-stock').value, format: $('#new-roll-format').value, camera: $('#new-roll-camera').value.trim() }); toast('新胶卷已创建'); if (queuedFiles?.length) addFiles(queuedFiles); else if (shouldImport) $('#file-input').click(); };
     $('#new-roll-dialog').addEventListener('close', () => { if ($('#new-roll-dialog').returnValue === 'cancel') { pendingImport = false; pendingFiles = null; } $('#new-roll-submit').textContent = '创建胶卷'; });
     $('#new-roll-format').onchange = renderNewRollPicker;
     $('#new-roll-style-filter').onclick = event => { const button = event.target.closest('[data-new-style-kind]'); if (!button) return; newRollStyleKind = button.dataset.newStyleKind; $$('[data-new-style-kind]').forEach(node => node.classList.toggle('active', node === button)); renderNewRollPicker(); };
@@ -394,7 +368,9 @@
     $('#roll-list').onclick = event => { const card = event.target.closest('[data-roll]'); if (!card) return; activeRollId = card.dataset.roll; activeFrame = 0; selection.clear(); renderAll(); };
     $$('[data-roll-filter]').forEach(button => button.onclick = () => { rollFilter = button.dataset.rollFilter; $$('[data-roll-filter]').forEach(node => node.classList.toggle('active', node === button)); renderRollList(); });
     $$('[data-frame-filter]').forEach(button => button.onclick = () => { frameFilter = button.dataset.frameFilter; $$('[data-frame-filter]').forEach(node => node.classList.toggle('active', node === button)); renderContact(renderVersion); });
-    $('#grid-size').oninput = event => $('#contact-grid').style.setProperty('--thumb', `${event.target.value}px`);
+    $('#grid-size').oninput = event => { $('#contact-grid').style.setProperty('--thumb', `${event.target.value}px`); layoutContactGrid(); };
+    $('#contact-grid').addEventListener('load', layoutContactGrid, true);
+    window.addEventListener('resize', layoutContactGrid);
     $('#btn-prev').onclick = $('#develop-prev').onclick = () => stepFrame(-1); $('#btn-next').onclick = $('#develop-next').onclick = () => stepFrame(1);
     $('#pull-range').oninput = event => { const amount = Number(event.target.value); $('#film-strip').style.transform = `translateX(${(100 - amount) * .42}%)`; $('#film-strip').style.opacity = String(.55 + amount * .0045); };
     let suppressFilmClick = false; let filmClickTimer; let contactClickTimer;
@@ -406,21 +382,17 @@
     ['#develop-rating', '#frame-rating', '#gallery-rating'].forEach(selector => $(selector).onclick = event => { const button = event.target.closest('[data-rating]'); if (button) setRating(Number(button.dataset.rating)); });
     const beforeAfter = $('#btn-before-after'); beforeAfter.onpointerdown = () => $('#develop-media').classList.add('original'); beforeAfter.onpointerup = beforeAfter.onpointercancel = beforeAfter.onpointerleave = () => $('#develop-media').classList.remove('original');
     $('#btn-export-frame').onclick = exportCurrentFrame;
-    for (const [id, key] of [['meta-name', 'name'], ['meta-format', 'format'], ['meta-status', 'status'], ['meta-camera', 'camera'], ['meta-lens', 'lens'], ['meta-location', 'location'], ['meta-date', 'date'], ['meta-process', 'process'], ['meta-notes', 'notes']]) $('#'+id).onchange = event => { const roll = activeRoll(); if (!roll) return; checkpoint(); roll[key] = event.target.value; save(); renderAll(); };
-    $('#btn-delete-roll').onclick = () => { const roll = activeRoll(); if (!roll || !confirm(`删除胶卷“${roll.name}”？可通过撤销恢复。`)) return; checkpoint(); rolls = rolls.filter(item => item.id !== roll.id); activeRollId = rolls[0]?.id || null; activeFrame = 0; selection.clear(); save(); renderAll(); toast('胶卷已移除'); };
+    for (const [id, key] of [['meta-name', 'name'], ['meta-format', 'format'], ['meta-status', 'status'], ['meta-camera', 'camera'], ['meta-lens', 'lens'], ['meta-location', 'location'], ['meta-date', 'date'], ['meta-process', 'process'], ['meta-notes', 'notes']]) $('#'+id).onchange = event => { const roll = activeRoll(); if (!roll) return; roll[key] = event.target.value; save(); renderAll(); };
+    $('#btn-delete-roll').onclick = () => { const roll = activeRoll(); if (!roll || !confirm(`确定从资料库移除胶卷“${roll.name}”？此操作不可撤销。`)) return; rolls = rolls.filter(item => item.id !== roll.id); activeRollId = rolls[0]?.id || null; activeFrame = 0; selection.clear(); save(); renderAll(); toast('胶卷已移除'); };
     $('#btn-clear-selection').onclick = () => { selection.clear(); renderAll(); };
     $('#brand-home').onclick = () => switchView('film');
-    $('#btn-undo').onclick = undo; $('#btn-redo').onclick = redo;
     $('#btn-fullscreen').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
     setupPanZoom('develop', '#develop-canvas', '#develop-zoom'); setupPanZoom('gallery', '#gallery-stage', '#gallery-zoom');
     $('#gallery-close').onclick = closeGallery; $('#gallery-prev').onclick = () => stepGallery(-1); $('#gallery-next').onclick = () => stepGallery(1);
     $('#gallery-toggle-thumbs').onclick = () => { const collapsed = $('#gallery').classList.toggle('thumbs-collapsed'); $('#gallery-toggle-thumbs').textContent = collapsed ? '展开缩略图' : '收起缩略图'; };
     $('#gallery-thumbs').onclick = event => { const thumb = event.target.closest('[data-gallery-frame]'); if (!thumb) return; galleryIndex = Number(thumb.dataset.galleryFrame); activeFrame = galleryIndex; resetZoom('gallery'); renderGallery(); };
-    $('#btn-project').onclick = event => { event.stopPropagation(); $('#project-menu').hidden = !$('#project-menu').hidden; };
-    $('#btn-export-project').onclick = exportProject; $('#btn-export-contact').onclick = exportContactSheet; $('#btn-export-catalog').onclick = exportCatalog; $('#btn-import-project').onclick = () => $('#project-input').click(); $('#project-input').onchange = event => { if (event.target.files[0]) importProject(event.target.files[0]); event.target.value = ''; };
-    document.addEventListener('click', event => { if (!event.target.closest('#project-menu') && !event.target.closest('#btn-project')) $('#project-menu').hidden = true; });
     let dragDepth = 0; document.addEventListener('dragenter', event => { if (![...event.dataTransfer.types].includes('Files')) return; event.preventDefault(); dragDepth++; $('#drop-overlay').classList.add('show'); }); document.addEventListener('dragover', event => event.preventDefault()); document.addEventListener('dragleave', () => { dragDepth--; if (dragDepth <= 0) { dragDepth = 0; $('#drop-overlay').classList.remove('show'); } }); document.addEventListener('drop', event => { event.preventDefault(); dragDepth = 0; $('#drop-overlay').classList.remove('show'); addFiles(event.dataTransfer.files); });
-    document.addEventListener('keydown', event => { const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName); if (event.key === 'Escape' && !$('#gallery').hidden) { closeGallery(); return; } if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; } if (typing) return; const galleryOpen = !$('#gallery').hidden; if (event.key === 'ArrowLeft') galleryOpen ? stepGallery(-1) : stepFrame(-1); if (event.key === 'ArrowRight') galleryOpen ? stepGallery(1) : stepFrame(1); if (galleryOpen) return; if (event.key === '1') switchView('film'); if (event.key === '2') switchView('contact'); });
+    document.addEventListener('keydown', event => { const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName); if (event.key === 'Escape' && !$('#gallery').hidden) { closeGallery(); return; } if (typing) return; const galleryOpen = !$('#gallery').hidden; if (event.key === 'ArrowLeft') galleryOpen ? stepGallery(-1) : stepFrame(-1); if (event.key === 'ArrowRight') galleryOpen ? stepGallery(1) : stepFrame(1); if (galleryOpen) return; if (event.key === '1') switchView('film'); if (event.key === '2') switchView('contact'); });
     $$('[data-mobile-view]').forEach(button => button.onclick = () => { $('.library-panel').classList.remove('mobile-show'); $('.inspector-panel').classList.remove('mobile-show'); switchView(button.dataset.mobileView); });
     $$('[data-mobile]').forEach(button => button.onclick = () => { const panel = button.dataset.mobile === 'library' ? $('.library-panel') : $('.inspector-panel'); const show = !panel.classList.contains('mobile-show'); $$('.panel').forEach(item => item.classList.remove('mobile-show')); panel.classList.toggle('mobile-show', show); });
   }
