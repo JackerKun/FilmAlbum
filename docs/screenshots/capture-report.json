@@ -1,0 +1,98 @@
+{
+  "generatedAt": "2026-11-04T06:50:36.839Z",
+  "version": "3.0.1",
+  "source": "seedDemo",
+  "synthetic": true,
+  "shots": [
+    {
+      "name": "archive",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 83416,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库"
+    },
+    {
+      "name": "timeline",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 63146,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库"
+    },
+    {
+      "name": "film-135",
+      "width": 1600,
+      "height": 740,
+      "bytes": 57118,
+      "title": "全库照片",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库"
+    },
+    {
+      "name": "film-120",
+      "width": 1600,
+      "height": 740,
+      "bytes": 54298,
+      "title": "全库照片",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库"
+    },
+    {
+      "name": "lighttable",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 36368,
+      "title": "全库照片",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库"
+    },
+    {
+      "name": "projects",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 66242,
+      "title": "Across the world · 世界漫游",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库"
+    },
+    {
+      "name": "map",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 129400,
+      "title": "回忆地图",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库"
+    },
+    {
+      "name": "map-roll-picker",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 44184,
+      "title": "回忆地图",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库"
+    },
+    {
+      "name": "photobook",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 83408,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库"
+    },
+    {
+      "name": "library",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 59424,
+      "title": "资料库与备份",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库"
+    }
+  ]
+}

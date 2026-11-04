@@ -1,11 +1,15 @@
 <p align="center"><img src="assets/icons/icon-256.png" width="104" height="104" alt="Film Album logo"></p>
 <h1 align="center">Film Album</h1>
 <p align="center">A local-first film archive and photobook workspace.</p>
-<p align="center"><a href="README.md">简体中文</a> · English · <a href="https://github.com/JackerKun/FilmAlbum/releases">Downloads</a> · <a href="BUILDING.md">Build and release guide</a></p>
+<p align="center"><a href="README.md">简体中文</a> · English · <a href="#interface-tour">UI tour</a> · <a href="https://github.com/JackerKun/FilmAlbum/releases">Downloads</a> · <a href="BUILDING.md">Build and release guide</a></p>
 
 Film Album connects rolls, individual frames, multiple scans, physical negative locations, photographic projects, maps and print layouts. It runs as a macOS / Windows desktop application or a local web application.
 
-**Preview software.** Apple Silicon startup has been verified locally. Intel Mac and Windows require further native validation. The GitHub workflow tests and launches each package on its native system before preparing a draft release. Distribution signing and Apple notarization are not configured by default.
+![Archive overview with eight demo rolls, combined filters and the metadata inspector](docs/screenshots/archive.webp)
+
+_Actual application UI with built-in synthetic demo data. See the [interface tour](#interface-tour) for entry points and controls._
+
+**Preview software.** [3.0.1](https://github.com/JackerKun/FilmAlbum/releases/tag/v3.0.1) passed native builds, startup, thumbnails and original / PDF save checks on Apple Silicon Mac, Intel Mac, Windows x64 and Windows ARM64. These automated checks do not represent full manual acceptance of every feature. Distribution signing and Apple notarization are not configured by default.
 
 ## Download
 
@@ -18,7 +22,7 @@ Visit [Releases](https://github.com/JackerKun/FilmAlbum/releases) and select:
 | Windows, Intel / AMD x64     | `FilmAlbum-<version>-windows-x64-setup.exe`   |
 | Windows ARM64                | `FilmAlbum-<version>-windows-arm64-setup.exe` |
 
-ZIP archives are also available. Extract the complete Windows ZIP before starting `Film Album.exe`. End users do not need Node.js or Xcode. Releases may be empty until the first successful build is reviewed and published.
+ZIP archives are also available. Extract the complete Windows ZIP before starting `Film Album.exe`. End users do not need Node.js or Xcode. Release assets include `SHA256SUMS` for download verification.
 
 ## Features
 
@@ -33,6 +37,91 @@ ZIP archives are also available. Extract the complete Windows ZIP before startin
 - External-volume references, offline previews, integrity checks, recoverable trash and verified backups / restores.
 
 See the [Chinese usage guide](docs/USER_GUIDE.md) for detailed workflows. The interface supports Simplified Chinese and English for major navigation and common controls; some dynamic messages remain untranslated.
+
+## Interface tour
+
+These are real **3.0.1** screenshots of the built-in demo library: **8 rolls and 98 visible synthetic images**, with multiple scans, coordinates, projects, a photobook and disconnected-storage examples. The landscapes are generated locally; no personal photographs are included. Screenshots use the Simplified Chinese UI; English is available in the top language selector. Click images for a larger view and expand the additional examples below.
+
+### From a roll to individual frames
+
+<details>
+<summary>135 and 120: distinct spools, perforations and unrolling interactions</summary>
+
+**Open:** enter a roll from Archive, then choose **Film strip** in the light table. Drag the gold leader / take-up spool or use the slider. Drag horizontally to browse and double-click a frame to review it.
+
+**135:** a cassette and film with two rows of perforations; pull out and rewind.
+
+![135 film strip with a Portra 400 cassette, perforations, frame previews and an unroll slider](docs/screenshots/film-135.webp)
+
+**120:** supply spool, backing paper and take-up spool, with wide unperforated film. Frame proportions follow the selected 6×4.5 / 6×6 / 6×7 format.
+
+![120 film strip with backing paper, unperforated frames and a take-up spool](docs/screenshots/film-120.webp)
+
+</details>
+
+<details>
+<summary>Timeline: browse photographic records by year and month</summary>
+
+**Open:** Archive → Timeline. Rolls follow their actual shooting dates. Use the year index and sort controls to browse the sequence while keeping equipment and physical archive details visible.
+
+![Chronological roll timeline with a year index, monthly records and metadata](docs/screenshots/timeline.webp)
+
+</details>
+
+### Light table: review photographs with their context
+
+**Open:** double-click a photograph in the light table. The bottom thumbnails follow the current query results. Use `F` to fit, `Z` for actual pixels, `I` for EXIF, `H` for the histogram and `1–5` to rate. Two-image / four-image comparisons and scan-version comparisons are also available.
+
+![Photo review with current-result thumbnails, EXIF, RGB histogram, rating and color labels](docs/screenshots/lighttable.webp)
+
+<details>
+<summary>Projects: organize candidates and final selections into chapters</summary>
+
+**Open:** Projects / Curation → select a project. Add selected photographs from the light table, filter by chapter and selection stage, switch to the curation canvas or export a portfolio.
+
+![Demo photographic project with a photo sequence, chapters and selection-stage controls](docs/screenshots/projects.webp)
+
+</details>
+
+### Memory map: preview photographs before placing a roll
+
+**Open:** Memory map. Click a roll marker to preview its frames, or search for a region, city, county or street. To place a roll, select it, click the map and explicitly confirm the position. China is the default region; change the default country in library settings.
+
+![Map with China in view, roll positions, Shanghai photo previews and saved coordinates](docs/screenshots/map.webp)
+
+<details>
+<summary>Roll lookup: combine location status, dates, places, equipment and film filters</summary>
+
+**Open:** Memory map → position the selected roll. Search names or permanent codes, then combine location status, year, format, film type / stock, date range, place, equipment, project and tag filters. Results include photo previews, coordinates and pagination. Valid coordinates count as located even without a place name.
+
+![Roll placement picker with combined filters, photo covers, location badges and coordinates](docs/screenshots/map-roll-picker.webp)
+
+</details>
+
+### Photobooks: find images, lay out precisely and export
+
+**Open:** Custom photobook → create a book or edit the demo book. Filter assets by place, roll and date on the left. Move image frames and resize their corners in the center; double-click to drag the crop. Set millimeter coordinates, rotation and alignment on the right. Save, run Preflight / PDF to check missing images and resolution, then export.
+
+![Photobook editor with detailed asset filters, page guides, a selected photo frame and alignment properties](docs/screenshots/photobook.webp)
+
+<details>
+<summary>Library: check originals, cache offline previews and manage external drives</summary>
+
+**Open:** Library → Overview. Check original availability, preview-cache coverage and disconnected media; run integrity checks or create and verify snapshots under Backup. Generate offline previews while originals are connected. Browsing the cache works after disconnecting a drive; original export and print-quality output still require the originals.
+
+![Library overview with roll and photo totals, preview coverage, original checks and storage volumes](docs/screenshots/library.webp)
+
+</details>
+
+### Try the same demo library
+
+Start the local server as described in [Run from source](#run-from-source), then open `http://127.0.0.1:8091/?debug=1`:
+
+1. Choose **Generate new demo library** in the experimental entry.
+2. Wait for the background task, then choose **Open demo library** in the task center.
+3. Explore the workspaces. Use the demo / return entry to return to your regular library afterward.
+
+Demo libraries use separate folders and do not overwrite your original library. The experimental entry is hidden during normal startup. Maintainers can refresh these images using the [capture script](scripts/screenshots.mjs); see [capture notes](docs/screenshots/README.md).
 
 ## Run from source
 
