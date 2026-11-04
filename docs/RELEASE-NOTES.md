@@ -26,3 +26,8 @@ Existing libraries are not bundled. Back up your own library before upgrading. U
 安装包不含个人资料库。升级前请备份原库，通过“文件 → 打开资料库”选择现有目录。
 
 See the repository README and BUILDING.md for usage, storage locations and build instructions.
+
+## Map placement / 地图定位
+
+Located status now uses validated latitude / longitude, independent of the optional place name. The placement picker includes keyword, year, format, stock type / model, equipment, date range, place, tag and location-status filters, bounded pagination and photo previews.
+定位状态以有效经纬度为准，未填写地名也会显示已定位。选卷窗口支持关键词、年份、规格、类型 / 型号、设备、日期范围、地点、标签、定位状态、分页与照片预览。

@@ -1,3 +1,4 @@
+import { rollCoordinates, rollPosition, coordinateLabel } from '../shared/geolocation.mjs';
 import { STOCKS } from '../shared/film-stocks.mjs';
 export const COUNTRY_VIEWS = {
   CN: {
@@ -89,7 +90,15 @@ export function createAtlas({
         .slice(0, 8)
         .map((p) => `<img src="${thumb(p.mediaId, 320)}" alt="${E(p.name)}" loading="lazy">`)
         .join('') || '<p>此卷尚无照片</p>'
-    }</div><small>${E(r.location || '未记录地点')} · ${r.frameCount ?? photos.length} 格</small>`;
+    }</div><small data-atlas-location>${E(positionText(r))} · ${r.frameCount ?? photos.length} 格</small>`;
+  function positionText(roll) {
+    const position = rollPosition(roll);
+    return position.kind === 'located'
+      ? '已定位 · ' + (position.place || '已保存坐标') + ' · ' + coordinateLabel(roll)
+      : position.kind === 'name-only'
+        ? '未定位（尚无完整坐标） · ' + position.place
+        : '未定位 · 尚未记录坐标';
+  }
   async function details(id) {
     const [roll, result] = await Promise.all([
       api('/rolls/' + encodeURIComponent(id)),
@@ -108,7 +117,7 @@ export function createAtlas({
     panel.hidden = false;
     panel.innerHTML =
       preview(data.roll, data.photos) +
-      `<div class="atlas-preview-actions"><button data-atlas="open-roll">查看整卷</button><button data-atlas="inspect-roll">查看档案</button><button data-atlas="place">为这卷定位</button><button data-atlas="dismiss">关闭</button></div><div id="atlas-position-draft"></div>`;
+      `<div class="atlas-preview-actions"><button data-atlas="open-roll">查看整卷</button><button data-atlas="inspect-roll">查看档案</button><button data-atlas="place">${rollCoordinates(data.roll) ? '修改定位' : '为这卷定位'}</button><button data-atlas="dismiss">关闭</button></div><div id="atlas-position-draft"></div>`;
     selectedRoll = data.roll;
     panel.onclick = async (e) => {
       const a = e.target.closest('[data-atlas]')?.dataset.atlas;
@@ -132,9 +141,13 @@ export function createAtlas({
         map.getContainer().classList.remove('placing');
       }
     };
+    const coordinates = rollCoordinates(data.roll);
+    if (coordinates) {
+      if (assign && map.getZoom() < 10)
+        map.setView([coordinates.latitude, coordinates.longitude], 10);
+      else map.panTo([coordinates.latitude, coordinates.longitude]);
+    }
     if (assign) activatePlacement();
-    else if (data.roll.latitude != null && data.roll.longitude != null)
-      map.panTo([data.roll.latitude, data.roll.longitude]);
   }
   function activatePlacement() {
     draft = null;
@@ -173,8 +186,11 @@ export function createAtlas({
     if (!draft || !selectedRoll) return;
     const patch = { ...draft, location: host.querySelector('#atlas-location-name').value };
     try {
-      await savePosition(selectedRoll, patch);
-      selectedRoll = { ...selectedRoll, ...patch, version: selectedRoll.version + 1 };
+      const saved = await savePosition(selectedRoll, patch);
+      selectedRoll = { ...selectedRoll, ...saved };
+      host.querySelector('[data-atlas-location]').textContent =
+        positionText(selectedRoll) + ' · ' + selectedRoll.frameCount + ' 格';
+      host.querySelector('[data-atlas=place]').textContent = '修改定位';
       draft = null;
       draftMarker?.remove();
       draftMarker = null;

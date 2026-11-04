@@ -1,3 +1,4 @@
+import { createMapRollPicker } from './map-roll-picker.mjs';
 import { renderTaskRows } from './task-center.mjs';
 import { createFileActions } from './file-actions.mjs';
 import { emptyPhotoState } from './offline-ui.mjs';
@@ -2586,26 +2587,33 @@ async function action(name, value, element) {
       break;
     }
     case 'map-place': {
-      modal(
-        '选择要定位的胶卷',
-        `<input id="map-roll-search" placeholder="按名称或永久编号搜索胶卷"><div id="map-roll-results"></div>`,
-        null,
+      modal('选择要定位的胶卷', '<div id="map-roll-picker"></div>', null);
+      const dialog = $('#editor');
+      dialog.classList.add('map-picker-dialog');
+      const picker = createMapRollPicker({
+        api,
+        E,
+        thumb,
+        stocks: STOCKS,
+        facets: STATE.boot.facets || {},
+        toast,
+        onRows: (rows) => {
+          for (const roll of rows) STATE.entities.set(roll.id, roll);
+        },
+        onSelect: async (id) => {
+          dialog.close();
+          await atlas.assign(id);
+        },
+      });
+      dialog.addEventListener(
+        'close',
+        () => {
+          picker.destroy();
+          dialog.classList.remove('map-picker-dialog');
+        },
+        { once: true },
       );
-      const search = async (q) => {
-        const r = await api(
-          '/rolls?filter=' + encodeURIComponent(JSON.stringify({ query: q, limit: 30 })),
-        );
-        $('#map-roll-results').innerHTML =
-          r.items
-            .map(
-              (roll) =>
-                `<button class="map-roll-choice" type="button" data-action="map-assign-roll" data-value="${E(roll.id)}">${img(roll.coverMedia, roll.name)}<span><b>${E(roll.name)}</b><small>${E(roll.code)} · ${roll.frameCount} 格 · ${E(roll.location || '未定位')}</small></span></button>`,
-            )
-            .join('') || '<p>没有匹配的胶卷</p>';
-        for (const roll of r.items) STATE.entities.set(roll.id, roll);
-      };
-      $('#map-roll-search').oninput = (e) => search(e.target.value).catch((e) => toast(e.message));
-      await search('');
+      picker.mount($('#map-roll-picker'));
       break;
     }
     case 'map-assign-roll':

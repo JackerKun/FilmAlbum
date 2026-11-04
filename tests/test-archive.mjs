@@ -16,6 +16,7 @@ function harness() {
   };
   const context = { document, setTimeout, clearTimeout };
   const source = readFileSync(new URL('../src/client/legacy/app.js', import.meta.url), 'utf8')
+    .replace(/\r\n/g, '\n')
     .replace(/^import .*;\n/gm, '')
     .replace(
       "  initialize().catch(error => { console.error(error); toast('FilmAlbum 初始化失败', 'warning'); });",

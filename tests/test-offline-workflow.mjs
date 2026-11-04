@@ -66,7 +66,6 @@ test(
       external = join(base, 'drive');
     await mkdir(external);
     await mkdir(library);
-    t.after(() => rm(base, { recursive: true, force: true }));
     await copyFile(
       new URL('../assets/icons/icon-256.png', import.meta.url),
       join(external, '原片.png'),
@@ -91,8 +90,12 @@ test(
     let errors = '';
     child.stderr.on('data', (d) => (errors += d));
     t.after(async () => {
-      child.kill();
-      if (child.exitCode === null) await new Promise((r) => child.once('exit', r));
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = new Promise((resolve) => child.once('exit', resolve));
+        child.kill();
+        await exited;
+      }
+      await rm(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     });
     const origin = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(Error(errors || 'server timeout')), 10000);

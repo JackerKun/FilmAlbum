@@ -1,4 +1,6 @@
 export const STATIC_FILES = new Map([
+  ['/map-roll-picker.mjs', 'src/client/map-roll-picker.mjs'],
+  ['/shared/geolocation.mjs', 'src/shared/geolocation.mjs'],
   ['/atlas.css', 'src/client/atlas.css'],
   ['/book-designer.css', 'src/client/book-designer.css'],
   ['/book-designer.mjs', 'src/client/book-designer.mjs'],

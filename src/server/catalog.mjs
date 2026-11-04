@@ -1,3 +1,4 @@
+import { rollCoordinates } from '../shared/geolocation.mjs';
 import { mergeCustomStocks } from '../shared/stock-catalog.mjs';
 import { STOCKS } from '../shared/film-stocks.mjs';
 import { DatabaseSync } from 'node:sqlite';
@@ -124,6 +125,9 @@ export class Catalog {
     this.root = resolve(root);
     mkdirSync(this.root, { recursive: true });
     this.db = new DatabaseSync(join(this.root, 'catalog.sqlite'));
+    this.db.function('filmalbum_has_coordinates', { deterministic: true }, (value) =>
+      rollCoordinates(parse(value)) ? 1 : 0,
+    );
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     const version = this.db.prepare('PRAGMA user_version').get().user_version;
     if (version > 2) fail('资料库版本较新，请更新程序', 409);
@@ -603,6 +607,19 @@ export class Catalog {
         Number(b.north),
       );
     }
+    const located = 'filmalbum_has_coordinates(r.data)=1';
+    if (query.geolocation === 'located') add(located);
+    if (query.geolocation === 'unlocated') add('NOT (' + located + ')');
+    if (query.geolocation === 'named')
+      add('NOT (' + located + ") AND trim(COALESCE(r.location,''))<>''");
+    if (!photo && query.hasPhotos)
+      add('EXISTS(SELECT 1 FROM photos fp WHERE fp.roll_id=r.id AND fp.deleted_at IS NULL)');
+    if (!photo && query.tag)
+      add(
+        "(EXISTS(SELECT 1 FROM json_each(r.data,'$.tags') WHERE value=?) OR EXISTS(SELECT 1 FROM photos tp,json_each(tp.data,'$.tags') t WHERE tp.roll_id=r.id AND tp.deleted_at IS NULL AND t.value=?))",
+        query.tag,
+        query.tag,
+      );
     if (query.rollId && photo) add('p.roll_id=?', query.rollId);
     for (const field of ['stock', 'format', 'status', 'camera', 'lens', 'location', 'project'])
       if (query[field] && query[field] !== 'all') add(`r.${field}=?`, String(query[field]));
@@ -619,7 +636,7 @@ export class Catalog {
       add(
         "(r.format LIKE '4×5%' OR r.format LIKE '8×10%' OR r.format LIKE '4x5%' OR r.format LIKE '8x10%' OR lower(r.format) LIKE '%sheet%')",
       );
-    if (['bw', 'color'].includes(query.stockType)) {
+    if (['bw', 'color', 'slide', 'cinema'].includes(query.stockType)) {
       const ids = Object.entries(STOCKS)
         .filter(([, s]) => s.group === query.stockType)
         .map(([id]) => id);
@@ -1211,9 +1228,7 @@ export class Catalog {
       cell = 360 / 2 ** (zoom + 3),
       lat = "CAST(json_extract(r.data,'$.latitude') AS REAL)",
       lon = "CAST(json_extract(r.data,'$.longitude') AS REAL)";
-    let where =
-        filter.sql +
-        " AND json_extract(r.data,'$.latitude') IS NOT NULL AND json_extract(r.data,'$.longitude') IS NOT NULL",
+    let where = filter.sql + ' AND filmalbum_has_coordinates(r.data)=1',
       args = [...filter.args];
     if (query.bounds) {
       const b = query.bounds;
