@@ -446,30 +446,6 @@
   border-radius: 5px;
   line-height: 1.7;
 }
-.map-roll-choice {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 10px;
-  text-align: left;
-  border: 1px solid var(--line) !important;
-  border-radius: 6px;
-}
-.map-roll-choice img {
-  width: 94px;
-  height: 65px;
-  object-fit: cover;
-  border-radius: 3px;
-}
-.map-roll-choice span {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-.map-roll-choice small {
-  font-size: 10px;
-  color: var(--muted);
-}
 @media (max-width: 700px) {
   .atlas-toolbar {
     padding: 7px;
@@ -674,6 +650,10 @@
 .map-picker-roll-info code {
   overflow-wrap: anywhere;
   line-height: 1.5;
+}
+.map-picker-roll-info small {
+  font-size: 10px;
+  color: var(--muted);
 }
 .map-picker-roll-info code {
   font-size: 10px;
