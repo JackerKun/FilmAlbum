@@ -1,0 +1,10 @@
+node_modules/
+.build/
+dist/
+data/
+qa/
+assets/
+public/vendor/
+src/client/legacy/
+package-lock.json
+public/world-land.json

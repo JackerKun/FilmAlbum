@@ -1,0 +1,107 @@
+name: Desktop builds
+run-name: Desktop · ${{ github.ref_name }} · ${{ inputs.platform || 'all' }} / ${{ inputs.arch || 'all' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to build / 构建系统
+        type: choice
+        default: all
+        options: [all, mac, win]
+      arch:
+        description: Architecture / 处理器架构
+        type: choice
+        default: all
+        options: [all, arm64, x64]
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+concurrency:
+  group: desktop-${{ github.ref }}-${{ inputs.platform || 'all' }}-${{ inputs.arch || 'all' }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - id: matrix
+        name: Validate version tag and select native runners
+        env:
+          BUILD_PLATFORM: ${{ inputs.platform || 'all' }}
+          BUILD_ARCH: ${{ inputs.arch || 'all' }}
+        run: node scripts/ci-plan.mjs
+
+  package:
+    needs: plan
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          architecture: ${{ matrix.arch }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --include=optional --no-audit --no-fund
+      - id: package
+        name: Test and build on the native operating system
+        shell: bash
+        run: bash ./build.sh ${{ matrix.platform }} --arch ${{ matrix.arch }}
+      - name: Smoke-test packaged app on the native runner
+        run: node scripts/smoke-desktop.mjs
+      - id: collect
+        name: Verify checksums and collect distributable files
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        run: node scripts/collect-desktop.mjs ${{ matrix.platform }} ${{ matrix.arch }}
+      - name: Upload installers and test evidence
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: FilmAlbum-${{ matrix.platform }}-${{ matrix.arch }}
+          path: .build/artifacts/${{ matrix.platform }}-${{ matrix.arch }}/*
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  draft-release:
+    name: Prepare draft GitHub Release
+    needs: [plan, package]
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && needs.package.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: FilmAlbum-*
+          path: .build/release
+          merge-multiple: true
+      - uses: actions/github-script@v9
+        with:
+          retries: 3
+          script: |
+            const publishDraft = require('./scripts/publish-draft.cjs');
+            await publishDraft({github, context, core});

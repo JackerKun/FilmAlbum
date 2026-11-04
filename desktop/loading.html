@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' file:"
+  /><title>Film Album</title
+  ><style>
+    body {
+      margin: 0;
+      height: 100vh;
+      display: grid;
+      place-content: center;
+      text-align: center;
+      background: #eeeee8;
+      color: #252a24;
+      font: 14px system-ui;
+    }
+    img {
+      width: 104px;
+      margin: 0 auto 20px;
+    }
+    h1 {
+      font-size: 23px;
+      font-weight: 500;
+      letter-spacing: 0.03em;
+    }
+    p {
+      color: #84877b;
+      font-size: 12px;
+    }
+    .line {
+      margin: 20px auto;
+      width: 140px;
+      height: 2px;
+      background: #ddd;
+      overflow: hidden;
+    }
+    .line:after {
+      content: '';
+      display: block;
+      width: 40%;
+      height: 100%;
+      background: #84723c;
+      animation: progress 1.3s infinite;
+    }
+    @keyframes progress {
+      from {
+        transform: translateX(-100%);
+      }
+      to {
+        transform: translateX(350%);
+      }
+    }</style
+  ><img src="../assets/icons/icon-256.png" alt="Film Album" />
+  <h1>FILM ALBUM</h1>
+  <p>正在打开本地摄影档案 · Opening your archive</p>
+  <div class="line"></div>
+</html>

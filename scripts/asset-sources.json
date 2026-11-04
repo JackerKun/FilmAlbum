@@ -1,0 +1,23 @@
+{
+  "font": {
+    "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf",
+    "file": "assets/fonts/NotoSansSC-Regular.otf",
+    "licenseUrl": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/LICENSE",
+    "licenseFile": "assets/fonts/OFL.txt",
+    "sha256": "faa6c9df652116dde789d351359f3d7e5d2285a2b2a1f04a2d7244df706d5ea9"
+  },
+  "eng": {
+    "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata",
+    "file": "assets/ocr/eng.traineddata.gz",
+    "gzip": true,
+    "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+    "licenseUrl": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/LICENSE",
+    "licenseFile": "assets/ocr/LICENSE"
+  },
+  "chi_sim": {
+    "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/chi_sim.traineddata",
+    "file": "assets/ocr/chi_sim.traineddata.gz",
+    "gzip": true,
+    "sha256": "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730"
+  }
+}

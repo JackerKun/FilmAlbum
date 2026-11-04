@@ -1,2 +1,21 @@
 data/*
 !data/.gitkeep
+
+# Desktop dependencies and generated packages
+node_modules/
+.build/
+dist/
+qa/
+
+# Local desktop metadata and credentials
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
