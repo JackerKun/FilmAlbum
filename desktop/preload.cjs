@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld(
       ipcRenderer.invoke('filmalbum:save-file', { url: request?.url, filename: request?.filename }),
     revealFile: (path) => ipcRenderer.invoke('filmalbum:reveal-file', path),
     chooseDirectory: () => ipcRenderer.invoke('filmalbum:choose-directory'),
+    checkForUpdate: () => ipcRenderer.invoke('filmalbum:check-for-update'),
   }),
 );

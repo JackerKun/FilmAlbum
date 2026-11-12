@@ -23,6 +23,7 @@ import { join, resolve, relative, extname, basename } from 'node:path';
 import { Catalog, uid, json, parse } from './catalog.mjs';
 import { Jobs } from './jobs.mjs';
 import { native } from './native.mjs';
+import { contactSlots } from '../shared/photo-core.mjs';
 import { qrMatrix } from '../shared/qr.mjs';
 const home = workerData.home,
   jobs = new Jobs(home);
@@ -261,6 +262,7 @@ async function externalImport(job, catalog) {
       });
       catalog.addPhoto(rollId, mediaId, {
         name: basename(file.path),
+        useFileDate: false,
         type: mime(file.path).startsWith('video/') ? 'video' : 'image',
         exif,
       });
@@ -587,13 +589,28 @@ async function exportPdf(job, catalog) {
             pages: 1,
           }
         : catalog.query({ ...query, page });
-      for (const photo of result.items) {
+      const photos =
+        job.payload.mode === 'contact' && job.payload.rollId
+          ? contactSlots(result.items)
+          : result.items;
+      for (const photo of photos) {
         control(job);
-        const path = await ensurePreview(catalog, { id: photo.mediaId }, 1600).catch(() => null);
+        const path = photo.mediaId
+          ? await ensurePreview(
+              catalog,
+              { id: photo.mediaId },
+              job.payload.mode === 'contact' ? 640 : 1600,
+            ).catch(() => null)
+          : null;
         items.push({
           path,
-          name: photo.name,
-          caption: `${photo.rollName} · ${photo.frameNo} · ${photo.rating ? '★'.repeat(photo.rating) : ''}`,
+          name: job.payload.mode === 'contact' ? String(photo.frameNo || '') : photo.name,
+          caption:
+            job.payload.mode === 'contact'
+              ? [photo.rollCode, photo.strip && '条 ' + photo.strip, !photo.id && '未归档']
+                  .filter(Boolean)
+                  .join(' · ')
+              : `${photo.rollName} · ${photo.frameNo} · ${photo.rating ? '★'.repeat(photo.rating) : ''}`,
         });
         tick(job, items.length, ids?.length || result.total, '准备摄影年鉴');
       }
@@ -606,7 +623,15 @@ async function exportPdf(job, catalog) {
     manifest = join(dir, job.id + '.json');
   await writeFile(
     manifest,
-    json({ title: job.payload.title || 'Film Album 摄影年鉴', mode: job.payload.mode, items }),
+    json({
+      title: job.payload.title || 'Film Album 摄影年鉴',
+      mode: job.payload.mode,
+      matrix:
+        job.payload.mode === 'contact' && job.payload.rollId
+          ? qrMatrix('FILMALBUM:' + catalog.row('rolls', job.payload.rollId).code)
+          : undefined,
+      items,
+    }),
   );
   const result = await native(home, 'pdf', manifest, join(dir, file));
   return {

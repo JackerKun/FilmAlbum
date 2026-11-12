@@ -166,6 +166,14 @@ export class StudioService {
       root || this.catalog?.getMeta('settings')?.backupRoot || join(this.home, 'backups'),
     );
     const list = [];
+    const checks = new Map();
+    for (const job of this.jobs.list()) {
+      if (job.kind !== 'verify' || !['completed', 'failed'].includes(job.state)) continue;
+      const { backupRoot, snapshotId } = job.payload;
+      if (resolve(backupRoot || join(this.home, 'backups')) !== root || checks.has(snapshotId))
+        continue;
+      checks.set(snapshotId, { state: job.state, time: job.updated_at });
+    }
     for (const entry of await readdir(join(root, 'snapshots'), { withFileTypes: true }).catch(
       () => [],
     )) {
@@ -183,6 +191,7 @@ export class StudioService {
           missing: m.missing.length,
           newBytes: m.newBytes,
           sourceRoot: m.sourceRoot,
+          verification: checks.get(entry.name),
         });
       } catch {}
     }
@@ -286,6 +295,26 @@ export class StudioService {
       groupMode: input.groupMode || 'folders',
       numbering: input.numbering || 'sequential',
       rolls: {},
+      useFileDate: input.useFileDate === true,
+      filePlans: Object.fromEntries(
+        files.map((file, order) => {
+          if (
+            file.frameNo !== undefined &&
+            (typeof file.frameNo !== 'string' || file.frameNo.length > 24)
+          )
+            fail('格号最多 24 个字符');
+          if (
+            file.targetPhoto &&
+            (!input.targetRoll ||
+              this.c().row('photos', file.targetPhoto).roll_id !== input.targetRoll)
+          )
+            fail('重扫必须对应目标胶卷中的一格');
+          return [
+            file.path,
+            { order, frameNo: file.frameNo, targetPhoto: file.targetPhoto || null },
+          ];
+        }),
+      ),
     };
     if (payload.targetRoll) this.c().row('rolls', payload.targetRoll);
     if (payload.targetPhoto) this.c().row('photos', payload.targetPhoto);
@@ -329,7 +358,12 @@ export class StudioService {
       ...job,
       files: this.jobs.db
         .prepare('SELECT * FROM upload_files WHERE batch_id=? ORDER BY path')
-        .all(id),
+        .all(id)
+        .sort(
+          (a, b) =>
+            (job.payload.filePlans?.[a.path]?.order ?? 0) -
+            (job.payload.filePlans?.[b.path]?.order ?? 0),
+        ),
     };
   }
   async uploadChunk(jobId, key, offset, request) {
@@ -430,8 +464,15 @@ export class StudioService {
               hash,
             });
           } else await unlink(temp);
+          const plan = p.filePlans?.[file.path],
+            targetPhoto = p.targetPhoto || plan?.targetPhoto;
           let rollId = p.targetRoll;
-          if (p.targetPhoto) rollId = cat.row('photos', p.targetPhoto).roll_id;
+          if (targetPhoto) {
+            const destination = cat.row('photos', targetPhoto);
+            if (p.targetRoll && p.targetRoll !== destination.roll_id)
+              fail('重扫目标已移至其他胶卷', 409);
+            rollId = destination.roll_id;
+          }
           if (!rollId) {
             const group =
               p.groupMode === 'single'
@@ -458,16 +499,18 @@ export class StudioService {
             {
               name: file.name,
               frameNo:
-                p.numbering === 'filename'
+                plan?.frameNo ||
+                (p.numbering === 'filename'
                   ? file.name.match(/(?:^|[ _-])(\d{1,3}[a-z]?)(?=\.[^.]+$)/i)?.[1] || undefined
-                  : undefined,
-              kind: p.kind,
+                  : undefined),
+              useFileDate: p.useFileDate,
+              kind: targetPhoto && !p.targetPhoto ? 'rescan' : p.kind,
               type: (MIME[extname(file.name).toLowerCase()] || '').startsWith('video/')
                 ? 'video'
                 : 'image',
               exif,
             },
-            p.targetPhoto,
+            targetPhoto,
           );
           this.jobs.db
             .prepare("UPDATE upload_files SET state='done',result=? WHERE batch_id=? AND key=?")
@@ -686,6 +729,12 @@ export class StudioService {
           202,
         );
       }
+      if (path === '/imports/check-duplicates' && method === 'POST') {
+        const { files } = await input();
+        if (!Array.isArray(files) || files.length > 40) fail('每次最多核对 40 个文件');
+        const lookup = this.c().db.prepare('SELECT 1 FROM media WHERE hash=? AND size=? LIMIT 1');
+        return send(files.map(({ hash, size }) => Boolean(lookup.get(hash, size))));
+      }
       if (path === '/imports' && method === 'POST')
         return send(await this.uploadCreate(await input()), 201);
       const imp = /^\/imports\/([^/]+)(?:\/([^/]+))?$/.exec(path);
@@ -759,6 +808,7 @@ export class StudioService {
         return send({
           count: c.selectIds(data.entity, data.selection).length,
           revision: c.revision(),
+          ...(data.includeTags ? { tags: c.batchTags(data.entity) } : {}),
         });
       }
       if (path === '/batch' && method === 'POST') {

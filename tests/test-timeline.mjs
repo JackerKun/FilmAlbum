@@ -69,3 +69,29 @@ test('timeline sorts globally before pagination, ignores creation sequence and k
   );
   assert.equal(c.query({ sort: 'timeline-desc', location: '杭州' }, 'rolls').total, 1);
 });
+
+test('scan dates stay separate and partial capture dates overlap date filters', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'film-capture-date-')),
+    c = new Catalog(root);
+  t.after(() => {
+    c.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const roll = c.createRoll({ date: '1998-02', datePrecision: 'month' });
+  const mediaId = c.addMedia({ path: 'scan.tif', mime: 'image/tiff' });
+  const photo = c.addPhoto(roll.id, mediaId, {
+    frameNo: '00A',
+    useFileDate: false,
+    exif: { date: '2026:11:03 10:30:00', latitude: 0, longitude: 0 },
+  });
+  assert.equal(photo.date, '');
+  assert.equal(photo.fileDateSource, 'scan');
+  assert.equal(photo.exif.date, '2026:11:03 10:30:00');
+  assert.equal(c.query({ from: '1998-02-15', to: '1998-02-15' }).total, 1);
+  assert.equal(c.query({ from: '1998-03-01' }).total, 0);
+  c.patch('rolls', roll.id, { date: '1999', datePrecision: 'year' }, roll.version);
+  assert.equal(c.query({ from: '1999-12-31' }).total, 1);
+  assert.equal(c.query({ to: '1998-12-31' }).total, 0);
+  assert.equal(c.atlas({ mapMode: 'photos', points: true }).items[0].id, photo.id);
+  assert.equal(c.atlas({}).total, 0);
+});

@@ -3,7 +3,14 @@ import { renderTaskRows } from './task-center.mjs';
 import { createFileActions } from './file-actions.mjs';
 import { emptyPhotoState } from './offline-ui.mjs';
 import { renderTimeline } from './timeline.mjs';
-import { createAtlas, COUNTRY_VIEWS, countryOptions } from './map-view.mjs';
+import {
+  createAtlas,
+  COUNTRY_VIEWS,
+  countryOptions,
+  mountLocationPicker,
+  mountLocationPreview,
+} from './map-view.mjs';
+import { coordinateLabel, rollCoordinates } from '../shared/geolocation.mjs';
 import { filterStocks, mergeCustomStocks } from '../shared/stock-catalog.mjs';
 let DEBUG_MODE = new URLSearchParams(location.search).get('debug') === '1';
 import { mountFilmPull } from './film-pull.mjs';
@@ -60,7 +67,7 @@ const STATE = {
   query: {},
   view: 'cards',
   page: 0,
-  limit: 60,
+  limit: 50,
   result: { items: [], total: 0 },
   selected: new Set(),
   allMatching: false,
@@ -90,6 +97,10 @@ const STATE = {
   curationScale: 1,
 };
 let searchTimer, commandTimer, pollTimer, landData, closeMenuTimer;
+let navigationEntry,
+  navigationEnd = 0;
+const navigationSnapshots = new Map(),
+  navigationEndKey = 'filmalbum-navigation-end';
 function toast(message, type = '', link) {
   const node = document.createElement('div');
   node.className = 'toast ' + type;
@@ -144,6 +155,7 @@ const img = (id, name = '', className = '') =>
   id
     ? `<img loading="lazy" decoding="async" src="${thumb(id)}" alt="${E(name)}" class="${className}">`
     : '<span class="muted">尚未装入影像</span>';
+let archivePager, archiveMoreObserver, archiveFilmObserver, disposeInspectorMap;
 const currentEntity = () => (STATE.workspace === 'archive' ? 'rolls' : 'photos');
 const resultQuery = () => ({
   ...STATE.query,
@@ -153,7 +165,7 @@ const resultQuery = () => ({
         ...(STATE.projectStage !== 'all' ? { stage: STATE.projectStage } : {}),
       }
     : {}),
-  page: STATE.page,
+  page: STATE.workspace === 'archive' ? 0 : STATE.page,
   limit: STATE.limit,
   sort:
     STATE.workspace === 'archive' && STATE.view === 'timeline'
@@ -169,6 +181,40 @@ const select = (name, items, value = '', attributes = '') =>
   `<select name="${E(name)}" ${attributes}>${items.map((item) => option(item[0], item[1], value)).join('')}</select>`;
 const field = (name, label, value = '', type = 'text', attrs = '') =>
   `<label>${E(label)}<input name="${E(name)}" type="${type}" value="${E(value)}" ${attrs}></label>`;
+const datePrecisions = [
+  ['day', '具体日期'],
+  ['month', '月份'],
+  ['year', '大约年份'],
+];
+function dateValueControl(name, value, precision, required) {
+  const label = { day: '拍摄日期', month: '拍摄月份', year: '拍摄年份' }[precision],
+    attrs = required ? 'required' : '';
+  if (precision === 'year') {
+    const currentYear = new Date().getFullYear(),
+      latestYear = currentYear + 10,
+      years = new Set(Array.from({ length: latestYear - 1799 }, (_, i) => String(latestYear - i)));
+    for (const year of STATE.boot.facets?.years || []) years.add(year.value);
+    if (value) years.add(value.slice(0, 4));
+    return `<label>${label}${select(name, [['', '选择年份'], ...[...years].sort((a, b) => Number(b) - Number(a)).map((year) => [year, year])], value.slice(0, 4), attrs)}</label>`;
+  }
+  const month = precision === 'month',
+    length = month ? 7 : 10;
+  return field(
+    name,
+    label,
+    value.slice(0, length),
+    month ? 'month' : 'date',
+    `${attrs} min="${month ? '0001-01' : '0001-01-01'}" max="${month ? '9999-12' : '9999-12-31'}"`,
+  );
+}
+function dateFields(value = '', precision = 'day', { name = 'date', required = false } = {}) {
+  value = String(value ?? '');
+  if (value.length === 4) precision = 'year';
+  else if (value.length === 7 && precision !== 'year') precision = 'month';
+  if (!datePrecisions.some(([key]) => key === precision)) precision = 'day';
+  const precisionName = name === 'ruleValue' ? 'ruleValuePrecision' : 'datePrecision';
+  return `<div class="date-fields wide" data-date-name="${name}" data-date-required="${required}" data-date-value="${E(value)}"><label>日期精度${select(precisionName, datePrecisions, precision, 'data-date-precision')}</label><div class="date-value">${dateValueControl(name, value, precision, required)}</div></div>`;
+}
 function modal(title, html, submit, label = '保存', kicker = 'FILM ALBUM STUDIO') {
   STATE.editor = submit;
   $('#editor-title').textContent = title;
@@ -289,31 +335,107 @@ function clearSelection() {
   STATE.anchor = null;
   renderSelection();
 }
-function navigate(workspace, query = {}, extra = {}, push = true) {
+function resultScroller() {
+  const content = $('#view-content');
+  return content.querySelector('.table-wrap, .curation-viewport') || content;
+}
+function captureNavigation() {
+  const scroller = resultScroller();
+  return {
+    query: { ...STATE.query },
+    view: STATE.view,
+    page: STATE.page,
+    archivePage: archivePager?.page || 0,
+    projectStage: STATE.projectStage,
+    focus: STATE.focus,
+    inspectorTab: STATE.inspectorTab,
+    scrollTop: scroller.scrollTop,
+    scrollLeft: scroller.scrollLeft,
+    ...(STATE.workspace === 'atlas' && { map: atlas.getNavigationState() }),
+  };
+}
+function rememberNavigation(snapshot = captureNavigation()) {
+  if (navigationEntry) navigationSnapshots.set(navigationEntry.index, snapshot);
+}
+function updateNavigationButtons() {
+  $('#nav-back').disabled = !navigationEntry?.index;
+  $('#nav-forward').disabled = !navigationEntry || navigationEntry.index >= navigationEnd;
+}
+function navigate(workspace, query = {}, extra = {}) {
+  const snapshot = captureNavigation(),
+    current = navigationEntry;
+  if (
+    current?.workspace === workspace &&
+    JSON.stringify(snapshot.query) === JSON.stringify(query) &&
+    (!extra.view || extra.view === snapshot.view) &&
+    STATE.projectId === (extra.projectId || null) &&
+    STATE.projectView === (extra.projectView || 'photos') &&
+    STATE.storageTab === (extra.storageTab || 'overview') &&
+    !extra.mapFocusId
+  ) {
+    return refresh();
+  }
+  rememberNavigation(snapshot);
+  const index = current ? current.index + 1 : 0,
+    entry = { filmAlbum: true, index, workspace, query, extra };
+  for (const key of navigationSnapshots.keys()) {
+    if (key >= index) navigationSnapshots.delete(key);
+  }
+  const url = new URL(location.href);
+  url.searchParams.set('workspace', workspace);
+  if (DEBUG_MODE) url.searchParams.set('debug', '1');
+  if (query.rollId) url.searchParams.set('roll', query.rollId);
+  else url.searchParams.delete('roll');
+  if (current) history.pushState(entry, '', url);
+  else history.replaceState(entry, '', url);
+  navigationEnd = index;
+  sessionStorage.setItem(navigationEndKey, String(index));
+  return openNavigation(entry);
+}
+async function openNavigation(entry, snapshot) {
+  const { workspace, extra } = entry,
+    query = snapshot?.query || entry.query;
+  navigationEntry = entry;
+  updateNavigationButtons();
+  clearTimeout(searchTimer);
   if (STATE.workspace === 'atlas') atlas.destroy();
   STATE.workspace = workspace;
   STATE.query = { ...query };
-  STATE.page = 0;
+  STATE.page = snapshot?.page || 0;
   STATE.projectId = extra.projectId || null;
   STATE.storageTab = extra.storageTab || 'overview';
   STATE.projectView = extra.projectView || 'photos';
-  STATE.projectStage = 'all';
+  STATE.projectStage = snapshot?.projectStage || extra.projectStage || 'all';
+  STATE.mapFocusId = snapshot?.map ? snapshot.map.focusId : extra.mapFocusId;
+  STATE.mapFocusCoordinates = snapshot?.map
+    ? snapshot.map.focusCoordinates
+    : extra.mapFocusCoordinates;
+  STATE.mapRestoreView = snapshot?.map?.view || extra.mapView;
   clearSelection();
   STATE.layout = STATE.boot?.lists?.settings?.layouts?.[workspace] || {};
-  if (workspace === 'archive') STATE.view = STATE.layout.view || 'cards';
-  else STATE.view = query.rollId ? 'film' : STATE.layout.view || 'grid';
+  STATE.view =
+    snapshot?.view ||
+    extra.view ||
+    (workspace === 'archive'
+      ? STATE.layout.view || 'cards'
+      : !query.rollId && STATE.layout.view === 'yearbook'
+        ? 'yearbook'
+        : 'grid');
   applyLayout();
-  if (push)
-    history.pushState(
-      { workspace, query, extra },
-      '',
-      `?workspace=${workspace}${query.rollId ? '&roll=' + encodeURIComponent(query.rollId) : ''}${DEBUG_MODE ? '&debug=1' : ''}`,
-    );
   $('.sidebar').classList.remove('mobile-open');
   renderSidebar();
   renderHeader();
   renderQuery();
-  refresh();
+  resultScroller().scrollTo(0, 0);
+  if (snapshot) {
+    STATE.focus = snapshot.focus;
+    STATE.inspectorTab = snapshot.inspectorTab;
+    if (snapshot.focus) inspect(snapshot.focus.id, snapshot.focus.entity);
+    else resetInspector();
+  }
+  await refresh(snapshot?.archivePage);
+  if (snapshot && navigationEntry === entry)
+    resultScroller().scrollTo(snapshot.scrollLeft, snapshot.scrollTop);
 }
 function renderHeader() {
   const q = STATE.query,
@@ -341,6 +463,7 @@ function renderHeader() {
       ['cards', '卡片'],
       ['table', '档案表格'],
       ['rack', '胶卷架'],
+      ['film', '胶片条'],
       ['timeline', '时间轴'],
     ]
       .map(
@@ -351,7 +474,7 @@ function renderHeader() {
   if (STATE.workspace === 'lighttable')
     tools += `<div class="segmented">${[
       ['grid', '灯箱'],
-      ['film', '胶片条'],
+      ...(roll ? [['film', '胶片条']] : []),
       ['yearbook', '年鉴'],
     ]
       .map(
@@ -361,13 +484,17 @@ function renderHeader() {
       .join(
         '',
       )}</div><button class="soft" data-action="multi" aria-pressed="${STATE.multi}">${STATE.multi ? '多选中' : '多选'}</button>`;
+  if (STATE.workspace === 'lighttable' && roll)
+    tools +=
+      '<button class="soft" data-action="roll-contact-pdf">导出接触印样</button><button class="primary" data-action="import-roll" data-value="' +
+      E(roll.id) +
+      '">装入扫描</button>';
   if (STATE.workspace === 'projects')
     tools += project
-      ? `<button class="soft" data-action="edit-project">项目设置</button><button class="soft" data-action="project-view" data-value="${STATE.projectView === 'canvas' ? 'photos' : 'canvas'}">${STATE.projectView === 'canvas' ? '照片序列' : '策展画布'}</button><button class="soft" data-action="project-export">导出作品集</button>`
+      ? `<button class="soft" data-action="edit-project">项目设置</button><button class="soft" data-action="project-view" data-value="${STATE.projectView === 'canvas' ? 'photos' : 'canvas'}">${STATE.projectView === 'canvas' ? '照片序列' : '策展画布'}</button><button class="soft" data-action="project-export">导出作品集</button><button class="soft" data-action="project-contact">定稿印样</button><button class="soft" data-action="project-book">定稿转画册</button>`
       : '<button class="soft" data-action="new-project">＋ 新项目</button>';
   if (STATE.workspace === 'atlas')
-    tools +=
-      '<button class="soft" data-action="map-help">地图使用指南</button><button class="soft" data-action="yearbook">摄影年鉴</button><button class="soft" data-action="map-place">定位选中胶卷</button>';
+    tools += `<button class="soft" data-action="map-mode">${q.mapMode === 'photos' ? '按照片 · 切换到按卷' : '按卷 · 切换到按照片'}</button><button class="soft" data-action="map-help">地图使用指南</button><button class="soft" data-action="yearbook">摄影年鉴</button><button class="soft" data-action="map-place">定位选中胶卷</button>`;
   if (STATE.workspace === 'storage')
     tools += `<div class="segmented">${[
       ['overview', '总览'],
@@ -425,6 +552,16 @@ function renderQuery() {
     const p = STATE.boot.lists.projects.find((p) => p.id === STATE.projectId);
     html += `<select data-filter="chapter" aria-label="章节">${option('', '全部章节', q.chapter)}${(p?.chapters || []).map((c) => option(c, c, q.chapter)).join('')}</select>`;
   }
+  const active = [
+    ['camera', '相机'],
+    ['lens', '镜头'],
+    ['location', '地点'],
+    ['from', '从'],
+    ['to', '至'],
+    ['tag', '标签'],
+  ].filter(([key]) => q[key]);
+  if (active.length)
+    html += `<div class="active-query-filters">${active.map(([key, label]) => `<button class="soft" data-action="remove-query-filter" data-value="${key}">${label} · ${E(q[key])} ×</button>`).join('')}</div>`;
   $('#query-bar').innerHTML = html;
   $('#query-input').oninput = (event) => {
     STATE.query.query = event.target.value;
@@ -452,19 +589,100 @@ function renderSelection() {
     node.classList.toggle('selected', STATE.selected.has(node.dataset.record) || STATE.allMatching),
   );
 }
+function observeArchiveMore() {
+  archiveMoreObserver?.disconnect();
+  const content = $('#view-content'),
+    scroller = content.querySelector('.table-wrap') || content;
+  content.querySelector('[data-archive-more]')?.remove();
+  if (!archivePager || archivePager.restoring || archivePager.page + 1 >= STATE.result.pages)
+    return;
+  const marker = document.createElement('div');
+  const pager = archivePager;
+  marker.dataset.archiveMore = '';
+  marker.setAttribute('aria-hidden', 'true');
+  scroller.append(marker);
+  archiveMoreObserver = new IntersectionObserver(
+    ([entry]) => {
+      if (entry.isIntersecting && archivePager === pager && !pager.failed) loadArchiveMore();
+    },
+    { root: scroller, rootMargin: '0px 0px 180px' },
+  );
+  archiveMoreObserver.observe(marker);
+}
+async function loadArchiveMore() {
+  const pager = archivePager;
+  if (
+    STATE.workspace !== 'archive' ||
+    !pager ||
+    pager.loading ||
+    pager.page + 1 >= STATE.result.pages
+  )
+    return;
+  pager.loading = true;
+  pager.failed = false;
+  renderPagination();
+  try {
+    const result = await api(
+      '/rolls?filter=' +
+        encodeURIComponent(
+          JSON.stringify({
+            ...pager.query,
+            page: pager.page + 1,
+          }),
+        ),
+    );
+    if (archivePager !== pager) return;
+    const previous = STATE.result.items,
+      seen = new Set(previous.map((roll) => roll.id)),
+      added = result.items.filter((roll) => !seen.has(roll.id)),
+      content = $('#view-content'),
+      scrollTop = (content.querySelector('.table-wrap') || content).scrollTop;
+    pager.page++;
+    STATE.result = { ...result, items: [...previous, ...added] };
+    for (const roll of added) STATE.entities.set(roll.id, roll);
+    if (STATE.view === 'film') renderArchiveFilm(added, true);
+    else if (['cards', 'rack'].includes(STATE.view) && content.querySelector('.roll-grid'))
+      content
+        .querySelector('.roll-grid')
+        .insertAdjacentHTML('beforeend', added.map(rollCard).join(''));
+    else renderResults();
+    (content.querySelector('.table-wrap') || content).scrollTop = scrollTop;
+    renderSelection();
+    observeArchiveMore();
+  } catch (error) {
+    if (archivePager === pager) {
+      pager.failed = true;
+      toast(error.message, 'warning');
+    }
+  } finally {
+    if (archivePager === pager) {
+      pager.loading = false;
+      renderPagination();
+    }
+  }
+}
 function renderPagination() {
   const result = STATE.result;
   $('#pagination').hidden =
     ['atlas', 'storage'].includes(STATE.workspace) ||
     (STATE.workspace === 'projects' && (!STATE.projectId || STATE.projectView === 'canvas'));
+  if (STATE.workspace === 'archive') {
+    const more = archivePager && archivePager.page + 1 < result.pages;
+    $('#pagination').innerHTML =
+      `<span>已加载 ${result.items.length.toLocaleString()} / ${result.total.toLocaleString()} 卷</span><div><button data-action="select-page">全选已加载</button><button data-action="density">密度</button>${STATE.view === 'table' ? '<button data-action="columns">列设置</button>' : ''}${more ? `<button data-action="archive-more" ${archivePager.loading ? 'disabled' : ''}>${archivePager.loading ? '正在加载…' : archivePager.failed ? '重试加载' : '加载更多'}</button>` : ''}</div>`;
+    return;
+  }
   $('#pagination').innerHTML =
     `<span>${result.total.toLocaleString()} ${currentEntity() === 'rolls' ? '卷' : '张'}匹配 · 当前只加载 ${result.items.length} 条</span><div><button data-action="select-page">全选本页</button><button data-action="density">密度</button>${STATE.workspace === 'archive' && STATE.view === 'table' ? '<button data-action="columns">列设置</button>' : ''}<button data-action="page-prev" ${STATE.page === 0 ? 'disabled' : ''}>‹</button><span>${STATE.page + 1} / ${Math.max(1, result.pages || 1)}</span><button data-action="page-next" ${STATE.page + 1 >= (result.pages || 1) ? 'disabled' : ''}>›</button></div>`;
 }
-async function refresh() {
+async function refresh(restoreArchivePage = 0) {
   const request = ++STATE.request;
+  archivePager = null;
+  archiveMoreObserver?.disconnect();
+  archiveFilmObserver?.disconnect();
   try {
     if (STATE.workspace === 'storage') {
-      await renderStorage();
+      await renderStorage(request);
       return;
     }
     if (STATE.workspace === 'atlas') {
@@ -476,19 +694,36 @@ async function refresh() {
       return;
     }
     if (STATE.workspace === 'projects' && STATE.projectView === 'canvas') {
-      await renderCanvas();
+      await renderCanvas(request);
       return;
     }
+    const rollId = STATE.query.rollId;
+    if (STATE.workspace === 'lighttable' && rollId && !STATE.entities.has(rollId)) {
+      const roll = await api('/rolls/' + encodeURIComponent(rollId));
+      if (request !== STATE.request) return;
+      STATE.entities.set(rollId, roll);
+      renderHeader();
+    }
     const entity = currentEntity(),
-      result = await api(
-        '/' + entity + '?filter=' + encodeURIComponent(JSON.stringify(resultQuery())),
-      );
+      query = resultQuery(),
+      result = await api('/' + entity + '?filter=' + encodeURIComponent(JSON.stringify(query)));
     if (request !== STATE.request) return;
     STATE.result = result;
+    if (entity === 'rolls')
+      archivePager = { query, page: query.page, restoring: restoreArchivePage > 0 };
     for (const row of result.items) STATE.entities.set(row.id, row);
     renderResults();
     renderPagination();
     renderSelection();
+    if (archivePager) {
+      const pager = archivePager;
+      while (!pager.failed && pager.page < Math.min(restoreArchivePage, STATE.result.pages - 1)) {
+        await loadArchiveMore();
+        if (request !== STATE.request) return;
+      }
+      pager.restoring = false;
+      observeArchiveMore();
+    }
     $('#status-text').textContent =
       `${STATE.boot.lists?.demo ? '演示资料库 / DEMO' : '本地资料库'} · ${STATE.boot.stats?.rolls.toLocaleString() || 0} 卷 · 目录版本 ${result.revision}`;
   } catch (error) {
@@ -504,7 +739,7 @@ function photoCard(p) {
 function rollCard(r) {
   const stock = STOCKS[r.stock] || {},
     physical = r.physical || {};
-  return `<article class="roll-card ${STATE.selected.has(r.id) ? 'selected' : ''}" data-record="${E(r.id)}" data-entity="rolls" tabindex="0"><div class="roll-cover">${img(r.coverMedia, r.name)}<span class="stock-pill" style="--stock:${stock.color2 || '#d7c891'}">${E(stock.brand || 'FILM')} · ${E(stock.name || r.stock)}</span><code class="roll-code">${E(r.code)}</code></div><h3 data-user-content>${E(r.name)}</h3><p>${E(r.camera || '相机未记录')} · ${E(r.format)}<br>${E(r.location || '地点未记录')}</p><footer class="roll-footer"><span>${E(dateLabel(r))}</span><span>${r.frameCount} 格 · ${E(STATUS[r.status] || r.status)}</span></footer>${physical.box ? `<small class="muted">▣ ${E([physical.cabinet, physical.box, physical.album, physical.page, physical.pocket].filter(Boolean).join(' / '))}</small>` : ''}</article>`;
+  return `<article class="roll-card ${STATE.selected.has(r.id) ? 'selected' : ''}" data-record="${E(r.id)}" data-entity="rolls" tabindex="0"><div class="roll-cover">${img(r.coverMedia, r.name)}<span class="stock-pill" style="--stock:${stock.color2 || '#d7c891'}">${E(stock.brand || 'FILM')} · ${E(stock.name || r.stock)}</span><code class="roll-code">${E(r.code)}</code></div><h3 data-user-content>${E(r.name)}</h3><button class="text roll-open" data-action="roll-photos" data-value="${E(r.id)}">打开整卷 →</button><p>${E(r.camera || '相机未记录')} · ${E(r.format)}<br>${E(r.location || '地点未记录')}</p><footer class="roll-footer"><span>${E(dateLabel(r))}</span><span>${r.frameCount} 格 · ${E(STATUS[r.status] || r.status)}</span></footer>${physical.box ? `<small class="muted">▣ ${E([physical.cabinet, physical.box, physical.album, physical.page, physical.pocket].filter(Boolean).join(' / '))}</small>` : ''}</article>`;
 }
 const COLUMN_NAMES = {
   code: '永久编号',
@@ -520,9 +755,80 @@ const COLUMN_NAMES = {
   status: '状态',
   physical: '底片位置',
 };
+function renderArchiveFilm(rows, append = false) {
+  const content = $('#view-content');
+  if (!append) {
+    content.innerHTML = '<div class="archive-film-list"></div>';
+    archiveFilmObserver?.disconnect();
+    archiveFilmObserver = new IntersectionObserver(
+      (entries, observer) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          observer.unobserve(entry.target);
+          loadFilmPanel(entry.target);
+        }
+      },
+      { root: content, rootMargin: '140px 0px' },
+    );
+  }
+  const list = content.querySelector('.archive-film-list'),
+    start = list.children.length;
+  list.insertAdjacentHTML(
+    'beforeend',
+    rows
+      .map((roll) => {
+        const stock = STOCKS[roll.stock];
+        return `<section class="archive-film-roll"><header data-record="${E(roll.id)}" data-entity="rolls" tabindex="0"><div class="archive-film-cover">${img(roll.coverMedia, '')}</div><div><h3 data-user-content>${E(roll.name)}</h3><p>${[roll.code, stock?.name || roll.stock, roll.format, dateLabel(roll)].filter(Boolean).map(E).join(' · ')}</p></div><span>${roll.frameCount} 格</span><button type="button" class="text" data-action="roll-photos" data-value="${E(roll.id)}">打开整卷 →</button></header><div class="archive-film-panel" ${roll.frameCount ? 'data-film-pending' : ''} data-film-roll="${E(roll.id)}"><p class="muted">${roll.frameCount ? '等待载入胶片…' : '这卷还没有扫描。'}</p></div></section>`;
+      })
+      .join(''),
+  );
+  for (const section of [...list.children].slice(start)) {
+    const panel = section.querySelector('[data-film-pending]');
+    if (panel) archiveFilmObserver.observe(panel);
+  }
+}
+async function loadFilmPanel(panel) {
+  const roll =
+    STATE.entities.get(panel.dataset.filmRoll) ||
+    STATE.result.items.find((item) => item.id === panel.dataset.filmRoll);
+  if (!roll || !panel.isConnected) return;
+  panel.querySelector('p').textContent = '正在读取胶片…';
+  try {
+    const query = { rollId: roll.id, sort: 'frame', page: 0, limit: STATE.limit },
+      result = await api('/photos?filter=' + encodeURIComponent(JSON.stringify(query)));
+    if (!panel.isConnected) return;
+    if (!result.items.length) {
+      panel.querySelector('p').textContent = '这卷还没有扫描。';
+      return;
+    }
+    for (const photo of result.items) STATE.entities.set(photo.id, photo);
+    mountFilmPull(panel, result.items, roll, {
+      escape: E,
+      stock: STOCKS[roll.stock],
+      open: (id) =>
+        openPhoto(id, reviewOptions(result, query)).catch((error) =>
+          toast(error.message, 'warning'),
+        ),
+      inspect: (id) => inspect(id, 'photos'),
+    });
+  } catch (error) {
+    if (panel.isConnected) panel.querySelector('p').textContent = error.message;
+  } finally {
+    panel.removeAttribute('data-film-pending');
+  }
+}
 function renderResults() {
   const rows = STATE.result.items;
-  if (STATE.view === 'film' && rows.length && STATE.workspace === 'lighttable') {
+  if (STATE.workspace === 'archive' && STATE.view === 'film' && rows.length) {
+    renderArchiveFilm(rows);
+    return;
+  }
+  if (
+    STATE.view === 'film' &&
+    rows.length &&
+    STATE.workspace === 'lighttable' &&
+    STATE.query.rollId
+  ) {
     const roll = STATE.entities.get(STATE.query.rollId) || {
       name: rows[0].rollName,
       format: rows[0].format,
@@ -565,21 +871,22 @@ function renderResults() {
         .map(
           (r) =>
             `<tr data-record="${E(r.id)}" data-entity="rolls" class="${STATE.selected.has(r.id) ? 'selected' : ''}"><td><input type="checkbox" tabindex="-1" ${STATE.selected.has(r.id) ? 'checked' : ''} aria-label="选择 ${E(r.name)}"></td>${columns
-              .map(
-                (key) =>
-                  `<td ${['name', 'camera', 'lens', 'location', 'project', 'date'].includes(key) ? `contenteditable="true" data-edit-roll="${E(r.id)}" data-field="${key}" tabindex="0"` : ''}>${E(
-                    key === 'stock'
-                      ? STOCKS[r.stock]?.name || r.stock
-                      : key === 'status'
-                        ? STATUS[r.status] || r.status
-                        : key === 'physical'
-                          ? Object.values(r.physical || {})
-                              .filter(Boolean)
-                              .join(' / ')
-                          : key === 'date'
-                            ? r.date
-                            : r[key],
-                  )}</td>`,
+              .map((key) =>
+                key === 'location'
+                  ? `<td><button type="button" class="text" data-action="edit-roll-location" data-value="${E(r.id)}">${E(r.location || '设置地点')}</button></td>`
+                  : key === 'date'
+                    ? `<td><button type="button" class="text" data-action="edit-roll-date" data-value="${E(r.id)}" aria-label="编辑拍摄日期">${E(r.date || '设置日期')}</button></td>`
+                    : `<td ${['name', 'camera', 'lens', 'project'].includes(key) ? `contenteditable="true" data-edit-roll="${E(r.id)}" data-field="${key}" tabindex="0"` : ''}>${E(
+                        key === 'stock'
+                          ? STOCKS[r.stock]?.name || r.stock
+                          : key === 'status'
+                            ? STATUS[r.status] || r.status
+                            : key === 'physical'
+                              ? Object.values(r.physical || {})
+                                  .filter(Boolean)
+                                  .join(' / ')
+                              : r[key],
+                      )}</td>`,
               )
               .join('')}</tr>`,
         )
@@ -592,7 +899,6 @@ function renderResults() {
         statuses: STATUS,
         selected: STATE.selected,
         order: STATE.layout.timelineOrder || 'desc',
-        page: STATE.page,
       });
     else
       html = `<div class="roll-grid ${STATE.view === 'rack' ? 'roll-rack' : ''}">${rows.map(rollCard).join('')}</div>`;
@@ -628,8 +934,9 @@ function renderResults() {
     };
 }
 function pickRecord(id, entity, event = {}) {
-  const row = STATE.entities.get(id);
+  const row = STATE.entities.get(id) || STATE.result.items.find((item) => item.id === id);
   if (!row) return;
+  STATE.entities.set(id, row);
   const ids = STATE.result.items.map((r) => r.id),
     anchor = ids.indexOf(STATE.anchor),
     at = ids.indexOf(id);
@@ -649,6 +956,12 @@ function pickRecord(id, entity, event = {}) {
   renderSelection();
   renderInspector(row, entity);
 }
+function resetInspector() {
+  disposeInspectorMap?.();
+  disposeInspectorMap = null;
+  $('#inspector').innerHTML =
+    '<div class="empty">选择胶卷或照片<br><small>档案、版本与实物位置会显示在这里</small></div>';
+}
 async function inspect(id, entity, tab) {
   STATE.focus = { id, entity };
   if (tab) STATE.inspectorTab = tab;
@@ -663,9 +976,12 @@ async function inspect(id, entity, tab) {
       toast(error.message, 'warning');
       return;
     }
-  renderInspector(STATE.entities.get(id), entity);
+  if (STATE.focus?.id === id && STATE.focus.entity === entity)
+    renderInspector(STATE.entities.get(id), entity);
 }
 function renderInspector(row, entity) {
+  disposeInspectorMap?.();
+  disposeInspectorMap = null;
   if (!row) return;
   const tab = STATE.inspectorTab,
     roll = entity === 'rolls';
@@ -689,6 +1005,13 @@ function renderInspector(row, entity) {
       .join(
         '',
       )}</div></header><div class="inspector-body">${roll ? rollInspector(row, tab) : photoInspector(row, tab)}</div>`;
+  const mapHost = $('#inspector').querySelector('[data-roll-map-preview]');
+  if (mapHost)
+    disposeInspectorMap = mountLocationPreview(
+      mapHost,
+      rollCoordinates(row),
+      STATE.boot.lists.settings || {},
+    );
   if (entity === 'photos' && tab === 'versions' && !row.versions) inspect(row.id, entity, tab);
 }
 function rollInspector(r, tab) {
@@ -697,7 +1020,9 @@ function rollInspector(r, tab) {
     return `<div class="qr-label"><img src="/api/v2/rolls/${encodeURIComponent(r.id)}/qr.svg" alt="胶卷永久编号二维码"><code>${E(r.code)}</code></div><p class="form-note">给片袋贴上编号，从照片直接找到原始底片。</p>${['cabinet', 'box', 'album', 'page', 'pocket'].map((k, i) => field('physical.' + k, ['柜子 / 架位', '盒子', '片册', '页码', '片袋 / 条号'][i], p[k] || '', 'text', 'data-inspect-field')).join('')}<button class="soft" data-action="print-one-label">打印此卷标签</button><button class="soft" data-action="scan-qr">识别片袋二维码</button>`;
   }
   if (tab === 'notes')
-    return `<label>冲洗记录<textarea name="process" rows="4" data-inspect-field>${E(r.process || '')}</textarea></label><label>归档备注<textarea name="notes" rows="5" data-inspect-field>${E(r.notes || '')}</textarea></label><div class="two-cols">${field('latitude', '纬度', r.latitude ?? '', 'number', 'step="any" data-inspect-field')}${field('longitude', '经度', r.longitude ?? '', 'number', 'step="any" data-inspect-field')}</div><div class="inspector-actions"><button data-action="map-selected">在地图中查看</button><button data-action="trash-focus">放入回收站</button></div>`;
+    return `${field('exposureIndex', '实际曝光指数 EI', r.exposureIndex, 'number', 'min="1" max="102400" data-inspect-field')}${field('processType', '冲洗方式', r.processType, 'text', 'data-inspect-field')}${field('lab', '冲洗店家', r.lab, 'text', 'data-inspect-field')}<label>冲洗记录<textarea name="process" rows="4" data-inspect-field>${E(r.process || '')}</textarea></label><label>归档备注<textarea name="notes" rows="5" data-inspect-field>${E(r.notes || '')}</textarea></label><div class="two-cols">${field('latitude', '纬度', r.latitude ?? '', 'number', 'step="any" data-inspect-field')}${field('longitude', '经度', r.longitude ?? '', 'number', 'step="any" data-inspect-field')}</div><div class="inspector-actions"><button data-action="map-selected">在地图中查看</button><button data-action="save-film-preset">保存为胶卷模板</button><button data-action="trash-focus">放入回收站</button></div>`;
+  const coordinates = rollCoordinates(r);
+  const location = `<section class="roll-location"><small>地点</small><strong>${E(r.location || (coordinates ? '未命名地点' : '未设置地点'))}</strong>${coordinates ? `<div class="roll-location-preview" data-roll-map-preview aria-label="胶卷拍摄位置"></div><small>${coordinateLabel(coordinates)}</small>` : r.location ? '<small>尚未在地图定位</small>' : ''}<div class="inspector-actions"><button data-action="edit-roll-location" data-value="${E(r.id)}">在地图设置</button>${coordinates ? `<button data-action="map-selected" data-value="${E(r.id)}">回忆地图</button>` : ''}</div></section>`;
   return `${field('name', '胶卷名称', r.name, 'text', 'data-inspect-field')}<label>胶片${select(
     'stock',
     Object.entries(STOCKS).map(([id, s]) => [id, s.brand + ' ' + s.name]),
@@ -710,16 +1035,7 @@ function rollInspector(r, tab) {
     ),
     r.format,
     'data-inspect-field',
-  )}</label><label>状态${select('status', Object.entries(STATUS), r.status, 'data-inspect-field')}</label></div>${field('camera', '相机', r.camera, 'text', 'data-inspect-field')}${field('lens', '镜头', r.lens, 'text', 'data-inspect-field')}${field('location', '地点', r.location, 'text', 'data-inspect-field')}${field('date', '拍摄日期 / 年份', r.date, 'text', 'placeholder="2025-04-12 或 约 1998 年填 1998" data-inspect-field')}<label>日期精度${select(
-    'datePrecision',
-    [
-      ['day', '具体日期'],
-      ['month', '只确定月份'],
-      ['year', '大约年份'],
-    ],
-    r.datePrecision || 'day',
-    'data-inspect-field',
-  )}</label>${field('project', '拍摄项目', r.project, 'text', 'data-inspect-field')}<div class="inspector-actions"><button data-action="roll-photos" data-value="${E(r.id)}">查看整卷照片</button><button data-action="import-roll" data-value="${E(r.id)}">装入影像</button><button data-action="inspect-tab" data-value="physical">定位底片</button></div>`;
+  )}</label><label>状态${select('status', Object.entries(STATUS), r.status, 'data-inspect-field')}</label></div>${field('camera', '相机', r.camera, 'text', 'data-inspect-field')}${field('lens', '镜头', r.lens, 'text', 'data-inspect-field')}${location}<div class="inspector-date">${dateFields(r.date, r.datePrecision)}<button class="soft" data-action="save-roll-date">保存拍摄日期</button></div>${field('project', '拍摄项目', r.project, 'text', 'data-inspect-field')}<div class="inspector-actions"><button data-action="roll-photos" data-value="${E(r.id)}">查看整卷照片</button><button data-action="import-roll" data-value="${E(r.id)}">装入影像</button><button data-action="inspect-tab" data-value="physical">定位底片</button></div>`;
 }
 function photoInspector(p, tab) {
   if (tab === 'exif') {
@@ -728,7 +1044,8 @@ function photoInspector(p, tab) {
       ['相机', [exif.make, exif.model].filter(Boolean).join(' ') || p.camera],
       ['镜头', exif.lens || p.lens],
       ['尺寸', exif.width && `${exif.width} × ${exif.height}`],
-      ['时间', exif.date || p.date],
+      ['拍摄日期', p.date || p.rollDate],
+      [p.fileDateSource === 'scan' ? '文件 EXIF 时间（扫描件）' : '文件 EXIF 时间', exif.date],
       ['ISO', exif.iso],
       ['光圈', exif.aperture && 'f/' + exif.aperture],
       [
@@ -756,7 +1073,7 @@ function photoInspector(p, tab) {
   }
   if (tab === 'versions')
     return `<p class="form-note">同一格底片可收纳店扫、自扫、重扫和调色版本。主版本用于默认预览。</p>${(p.versions || []).map((v) => `<div class="version-row"><b>${E(v.name)}</b>${p.primary_version === v.id ? ' <span class="badge">主版本</span>' : ''}<p>${E({ scan: '扫描原版', rescan: '重扫', edit: '调色版本', export: '导出副本' }[v.kind] || v.kind)} · ${bytes(v.size)} · ${E(v.availability)}</p><div><button data-action="view-version" data-value="${E(v.id)}">查看</button>${p.primary_version !== v.id ? `<button data-action="primary-version" data-value="${E(v.id)}">设为主版本</button><button data-action="compare-version" data-value="${E(v.id)}">与主版本对比</button>` : ''}<button data-action="rename-version" data-value="${E(v.id)}">命名</button></div></div>`).join('')}<button class="soft" data-action="import-version">＋ 加入扫描版本</button>`;
-  return `<div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button data-action="rate" data-value="${n}" class="${n <= p.rating ? 'active' : ''}" aria-label="${n} 星">★</button>`).join('')}</div>${field('name', '照片名称', p.name, 'text', 'data-inspect-field')}${field('frameNo', '底片边码 / 格号', p.frameNo || '', 'text', 'data-inspect-field')}<div class="two-cols"><label>色标${select(
+  return `<div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button data-action="rate" data-value="${n}" class="${n <= p.rating ? 'active' : ''}" aria-label="${n} 星">★</button>`).join('')}</div>${field('name', '照片名称', p.name, 'text', 'data-inspect-field')}${field('frameNo', '底片边码 / 格号', p.frameNo || '', 'text', 'data-inspect-field')}${field('strip', '底片条号', p.strip || '', 'text', 'data-inspect-field')}<div class="two-cols"><label>色标${select(
     'color',
     [
       ['', '无色标'],
@@ -776,7 +1093,7 @@ function photoInspector(p, tab) {
     ],
     p.rejected ? '1' : '0',
     'data-inspect-field',
-  )}</label></div>${field('tags', '照片标签（逗号分隔）', (p.tags || []).join(', '), 'text', 'data-inspect-field')}<label>备注<textarea name="notes" rows="3" data-inspect-field>${E(p.notes || '')}</textarea></label><div class="inspector-actions"><button data-action="review-focus">进入看片台</button><button data-action="inspect-tab" data-value="versions">扫描版本 ${p.versionCount || 1}</button><button data-action="locate-negative">找到底片</button><button class="soft" data-action="download-original" data-value="${E(p.id)}" ${['offline', 'missing'].includes(p.availability) ? 'disabled title="请连接原片后再导出；预览不能代替原片"' : ''}>导出原片…</button><button data-action="set-roll-cover">设为胶卷封面</button><button data-action="trash-focus">回收站</button></div>`;
+  )}</label></div>${field('tags', '照片标签（逗号分隔）', (p.tags || []).join(', '), 'text', 'data-inspect-field')}<label>备注<textarea name="notes" rows="3" data-inspect-field>${E(p.notes || '')}</textarea></label><div class="inspector-actions"><button data-action="review-focus">进入看片台</button><button data-action="inspect-tab" data-value="versions">扫描版本 ${p.versionCount || 1}</button><button data-action="locate-negative">找到底片</button><button data-action="photo-location">设置拍摄位置</button><button class="soft" data-action="download-original" data-value="${E(p.id)}" ${['offline', 'missing'].includes(p.availability) ? 'disabled title="请连接原片后再导出；预览不能代替原片"' : ''}>导出原片…</button><button data-action="set-roll-cover">设为胶卷封面</button><button data-action="trash-focus">回收站</button></div>`;
 }
 async function patchRecord(entity, id, patch) {
   const row = STATE.entities.get(id) || (await api('/' + entity + '/' + encodeURIComponent(id))),
@@ -788,6 +1105,11 @@ async function patchRecord(entity, id, patch) {
   $('#save-status').textContent = '已保存 · ' + new Date().toLocaleTimeString('zh-CN');
   if (STATE.focus?.id === id) renderInspector(STATE.entities.get(id), entity);
   return STATE.entities.get(id);
+}
+async function saveRollDate(id, date, datePrecision) {
+  await patchRecord('rolls', id, { date, datePrecision });
+  await bootstrap();
+  await refresh();
 }
 const atlas = createAtlas({
   api,
@@ -802,6 +1124,7 @@ const atlas = createAtlas({
   onAdvancedFilters: advancedFilters,
   inspectRoll: (id) => inspect(id, 'rolls'),
   openRoll: (id) => action('roll-photos', id),
+  openPhoto,
   savePosition: async (roll, patch) => {
     const r = await api('/rolls/' + encodeURIComponent(roll.id), {
       method: 'PATCH',
@@ -815,17 +1138,55 @@ const bookDesigner = createBookDesigner({ api, job, toast, E, thumb });
 const localeControl = installLocale();
 const reviewer = createReviewer({
   api,
+  formatSize: bytes,
+  rollStatus: (status) => STATUS[status] || status,
+  getMapTileURL: () => STATE.boot?.lists?.settings?.mapTileURL,
   toast,
   E,
   thumb,
   raw,
   patch: async (photo, patch) => {
     const result = await patchRecord('photos', photo.id, patch);
-    refresh();
     return result;
   },
-  onClose: () => {
-    refresh();
+  onClose: (mapDestination, reviewed) => {
+    if (mapDestination) {
+      navigate(
+        'atlas',
+        {},
+        {
+          mapFocusId: mapDestination.rollId,
+          mapFocusCoordinates: mapDestination.coordinates,
+        },
+      );
+      return;
+    }
+    if (STATE.workspace === 'archive') {
+      if (STATE.focus) inspect(STATE.focus.id, STATE.focus.entity);
+      return;
+    }
+    const content = $('#view-content'),
+      scroll = content.scrollTop,
+      followsRoll =
+        STATE.workspace === 'lighttable' &&
+        STATE.query.rollId &&
+        reviewed?.photo?.roll_id === STATE.query.rollId;
+    if (followsRoll) {
+      STATE.focus = { id: reviewed.photo.id, entity: 'photos' };
+      STATE.inspectorTab = 'details';
+      STATE.page = reviewed.page;
+      if (!STATE.multi && STATE.selected.size <= 1) {
+        STATE.selected.clear();
+        STATE.selected.add(reviewed.photo.id);
+      }
+    }
+    refresh().then(() => {
+      content.scrollTop = scroll;
+      if (followsRoll)
+        content
+          .querySelector('[data-record="' + CSS.escape(reviewed.photo.id) + '"]')
+          ?.scrollIntoView({ block: 'nearest' });
+    });
     if (STATE.focus) inspect(STATE.focus.id, STATE.focus.entity);
   },
   saveWinners: (ids) => newCollection(ids),
@@ -841,6 +1202,11 @@ function rulesEditor(existing = {}, seed = true) {
     existing.match || 'all',
   )}</label></div><div id="rules-list" class="rules">${(conditions.length ? conditions : seed ? [{ field: 'rating', op: 'gte', value: '4' }] : []).map(ruleRow).join('')}</div><button type="button" class="text" data-action="add-rule">＋ 增加条件</button>`;
 }
+function ruleValueControl(fieldName, value = '') {
+  return fieldName === 'date'
+    ? dateFields(value, 'day', { name: 'ruleValue' })
+    : `<input name="ruleValue" value="${E(value)}" placeholder="条件值">`;
+}
 function ruleRow(rule = {}) {
   return `<div class="rule-row">${select('ruleField', Object.entries({ rating: '照片评分', color: '照片色标', rejected: '淘汰标记', name: '名称', stock: '胶片编号', camera: '相机', lens: '镜头', location: '地点', date: '日期', project: '项目' }), rule.field || 'rating')}${select(
     'ruleOp',
@@ -852,7 +1218,7 @@ function ruleRow(rule = {}) {
       ['contains', '包含'],
     ],
     rule.op || 'eq',
-  )}<input name="ruleValue" value="${E(rule.value ?? '')}" placeholder="条件值"><button type="button" data-action="remove-rule" aria-label="移除条件">×</button></div>`;
+  )}<div data-rule-value>${ruleValueControl(rule.field, rule.value ?? '')}</div><button type="button" data-action="remove-rule" aria-label="移除条件">×</button></div>`;
 }
 function readRules() {
   return {
@@ -1055,51 +1421,126 @@ async function loadSelectedIds() {
   }
   return ids;
 }
+function locationPickerFields(name = 'value', record = {}, { split = false } = {}) {
+  const coordinates = rollCoordinates(record),
+    search = `<div class="batch-location-search"><label>搜索地点<input type="search" data-location-search value="${E(record.location || '')}"></label><button type="button" class="soft" data-location-find disabled>搜索</button></div><select data-location-results aria-label="地点搜索结果" hidden></select>`,
+    map = `<div class="batch-location-map" aria-label="设置拍摄位置"></div><output>${coordinates ? coordinateLabel(coordinates) : '点击地图标记拍摄位置'}</output>`,
+    place = `<label>地名（可选）<input data-location-name name="${name}" value="${E(record.location || '')}"></label>`;
+  return (
+    (split ? `<div>${search}${place}</div><div>${map}</div>` : search + map + place) +
+    `<input type="hidden" name="latitude" value="${E(coordinates?.latitude)}"><input type="hidden" name="longitude" value="${E(coordinates?.longitude)}">`
+  );
+}
+function rollLocationPatch(values) {
+  const location = String(values.location ?? '').trim(),
+    coordinates = rollCoordinates(values);
+  if (location && !coordinates) throw Error('请选择搜索结果或在地图上点选位置');
+  return {
+    location,
+    latitude: coordinates?.latitude ?? null,
+    longitude: coordinates?.longitude ?? null,
+  };
+}
 async function batchEditor() {
   const entity = currentEntity(),
+    rolls = entity === 'rolls',
     sel = selection(),
-    preview = await api('/batch-preview', { method: 'POST', body: { entity, selection: sel } }),
-    fields =
-      entity === 'rolls'
-        ? {
-            name: '胶卷名称',
-            stock: '胶片型号',
-            format: '画幅',
-            camera: '相机',
-            lens: '镜头',
-            location: '地点',
-            project: '项目',
-            date: '拍摄日期',
-            status: '胶卷状态',
-            tags: '胶卷标签',
-          }
-        : {
-            rating: '照片评分（0–5）',
-            color: '照片色标（red / yellow / green / blue / purple）',
-            tags: '照片标签（逗号分隔，覆盖原标签）',
-            rejected: '淘汰标记（0 保留 / 1 淘汰）',
-            notes: '照片备注',
-          };
+    preview = await api('/batch-preview', {
+      method: 'POST',
+      body: { entity, selection: sel, includeTags: true },
+    }),
+    fields = rolls
+      ? {
+          stock: '胶片型号',
+          format: '画幅',
+          status: '胶卷状态',
+          date: '拍摄日期',
+          camera: '相机',
+          lens: '镜头',
+          location: '地点',
+          project: '拍摄项目',
+          name: '胶卷名称',
+          tags: '胶卷标签',
+        }
+      : {
+          rating: '照片评分',
+          color: '照片色标',
+          rejected: '选片',
+          date: '拍摄日期',
+          tags: '照片标签',
+          notes: '照片备注',
+        };
+  const choices = (values) => [...new Set(values.filter(Boolean))].map((value) => [value, value]);
+  const facets = STATE.boot.facets || {},
+    facetValues = (key) => (facets[key] || []).map((entry) => entry.value),
+    options = {
+      stock: Object.entries(STOCKS).map(([id, stock]) => [
+        id,
+        [stock.brand, stock.name].filter(Boolean).join(' '),
+      ]),
+      format: choices([
+        '135',
+        '120 · 6×4.5',
+        '120 · 6×6',
+        '120 · 6×7',
+        '120 · 6×9',
+        '120 · 6×12',
+        '120 · 6×17',
+        ...facetValues('format'),
+      ]),
+      status: Object.entries(STATUS),
+      rating: [[0, '未评分'], ...[1, 2, 3, 4, 5].map((rating) => [rating, '★'.repeat(rating)])],
+      color: [
+        ['none', '无色标'],
+        ['red', '红色'],
+        ['yellow', '黄色'],
+        ['green', '绿色'],
+        ['blue', '蓝色'],
+        ['purple', '紫色'],
+      ],
+      rejected: [
+        ['0', '保留'],
+        ['1', '淘汰'],
+      ],
+    };
+  const clearable = new Set(['date', 'camera', 'lens', 'location', 'project', 'tags', 'notes']);
   modal(
-    '批量修改档案',
-    `<p class="form-note important">将修改 ${preview.count.toLocaleString()} ${entity === 'rolls' ? '卷' : '张'}匹配记录。此操作会写入历史，可在后续未修改这些记录时撤销。</p><div class="form-grid"><label>修改字段${select('field', Object.entries(fields), Object.keys(fields)[0])}</label>${field('value', '新值', '', 'text', 'required')}<label class="wide"><input type="checkbox" name="clear"> 明确清空所选字段</label></div>`,
+    rolls ? '批量修改胶卷档案' : '批量修改照片档案',
+    `<p class="form-note important">将修改 ${preview.count.toLocaleString()} ${rolls ? '卷' : '张'}。修改会写入历史，可在记录未再次修改时撤销。</p><div class="batch-edit"><label>修改字段${select('field', Object.entries(fields), Object.keys(fields)[0])}</label><fieldset data-batch-value></fieldset><label data-batch-clear><input type="checkbox" name="clear"><span>清空此字段</span></label></div>`,
     async (form) => {
-      const v = formValues(form);
-      let value = form.elements.clear.checked ? '' : v.value;
-      if (v.field === 'rating') value = Number(value);
-      if (v.field === 'rejected') value = value === '1';
-      if (v.field === 'tags')
-        value = value
+      const key = form.elements.field.value,
+        clear = form.elements.clear.checked && clearable.has(key),
+        data = new FormData(form);
+      let value = clear ? '' : String(data.get('value') ?? '').trim();
+      if (key === 'tags') {
+        const tags = value
           .split(/[,，]/)
-          .map((s) => s.trim())
+          .map((tag) => tag.trim())
           .filter(Boolean);
+        value = clear ? [] : [...new Set([...data.getAll('existingTag'), ...tags])];
+        if (!clear && !value.length) throw Error('请输入或选择标签，或勾选清空此字段');
+      } else if (key !== 'location' && !clear && !value) throw Error('请设置要写入的值');
+      if (key === 'rating') value = Number(value);
+      if (key === 'rejected') value = value === '1';
+      if (key === 'color' && value === 'none') value = '';
+      const patch = { [key]: value };
+      if (key === 'location') {
+        const coordinates = rollCoordinates({
+          latitude: data.get('latitude'),
+          longitude: data.get('longitude'),
+        });
+        if (!clear && !coordinates) throw Error('请在地图上设置地点');
+        Object.assign(patch, clear ? { latitude: null, longitude: null } : coordinates);
+      }
+      if (rolls && key === 'date')
+        patch.datePrecision = clear ? 'day' : form.elements.datePrecision.value;
       await api('/batch', {
         method: 'POST',
         body: {
           entity,
           selection: { ...sel, expectedRevision: preview.revision },
-          patch: { [v.field]: value },
-          label: '批量修改' + fields[v.field],
+          patch,
+          label: '批量修改' + fields[key],
         },
       });
       clearSelection();
@@ -1110,8 +1551,56 @@ async function batchEditor() {
     '确认修改',
     'BATCH METADATA',
   );
-  $('#editor-form [name="clear"]').onchange = (event) =>
-    ($('#editor-form [name="value"]').required = !event.target.checked);
+  const form = $('#editor-form'),
+    valueBox = form.querySelector('[data-batch-value]'),
+    clearBox = form.querySelector('[data-batch-clear]');
+  let disposeLocation;
+  $('#editor').addEventListener('close', () => disposeLocation?.(), { once: true });
+  function renderValue() {
+    const key = form.elements.field.value;
+    disposeLocation?.();
+    disposeLocation = null;
+    clearBox.hidden = !clearable.has(key);
+    clearBox.querySelector('span').textContent =
+      key === 'location' ? '清空地点和坐标' : '清空此字段';
+    form.elements.clear.checked = false;
+    valueBox.disabled = false;
+    if (key === 'date')
+      valueBox.innerHTML = dateFields('', 'day', { name: 'value', required: true });
+    else if (key === 'tags') {
+      valueBox.innerHTML = `${field('value', fields[key], '', 'text', 'placeholder="多个标签用逗号分隔"')}${
+        preview.tags.length
+          ? `<p class="batch-tag-label">已有标签</p><div class="batch-tags">${preview.tags.map((tag) => `<label><input type="checkbox" name="existingTag" value="${E(tag)}"><span>${E(tag)}</span></label>`).join('')}</div>`
+          : ''
+      }<small>本次设置的标签将替换原有标签。</small>`;
+    } else if (key === 'location') {
+      valueBox.innerHTML = locationPickerFields();
+      disposeLocation = mountLocationPicker(valueBox, {
+        api,
+        preferences: STATE.boot.lists.settings || {},
+      });
+    } else if (key === 'notes') {
+      valueBox.innerHTML =
+        '<label>照片备注<textarea name="value" rows="4" required></textarea></label>';
+    } else if (Object.hasOwn(options, key)) {
+      const list = options[key];
+      valueBox.innerHTML = `<label>${fields[key]}${select('value', [['', '请选择'], ...list], '', 'required')}</label>`;
+    } else {
+      const suggestions = facetValues(key);
+      valueBox.innerHTML = field(
+        'value',
+        fields[key],
+        '',
+        'text',
+        suggestions.length ? 'required list="batch-field-suggestions"' : 'required',
+      );
+      if (suggestions.length)
+        valueBox.innerHTML += `<datalist id="batch-field-suggestions">${suggestions.map((value) => option(value, value)).join('')}</datalist>`;
+    }
+  }
+  form.elements.field.onchange = renderValue;
+  form.elements.clear.onchange = () => (valueBox.disabled = form.elements.clear.checked);
+  renderValue();
 }
 async function trashSelected(restore = false) {
   const entity = currentEntity(),
@@ -1139,24 +1628,17 @@ async function trashSelected(restore = false) {
   );
 }
 function newRoll() {
-  const defaults = STATE.boot.lists.presets[0]?.metadata || {};
+  const presets = STATE.boot.lists.presets || [],
+    defaults = presets[0]?.metadata || {};
   modal(
     '装一卷新胶片',
-    `<div class="form-grid">${field('name', '胶卷名称', '新胶卷', 'text', 'required maxlength="80"')}<label>画幅${select(
+    `<div class="form-grid new-roll-form"><label>胶卷模板${select('rollPreset', [['', '手动设置'], ...presets.map((preset) => [preset.id, preset.name])], '')}</label>${field('name', '胶卷名称', '新胶卷', 'text', 'required maxlength="80" autofocus')}<label>画幅${select(
       'format',
       ['135', '120 · 6×4.5', '120 · 6×6', '120 · 6×7', '120 · 6×9', '120 · 6×12', '120 · 6×17'].map(
         (v) => [v, v],
       ),
       defaults.format || '135',
-    )}</label>${field('camera', '相机', defaults.camera || '')}${field('date', '拍摄日期 / 年份', '', 'text', 'placeholder="2026-11-03 或 1998"')}<label>日期精度${select(
-      'datePrecision',
-      [
-        ['day', '具体日期'],
-        ['month', '月份'],
-        ['year', '大约年份'],
-      ],
-      'day',
-    )}</label>${field('location', '地点', defaults.location || '')}<label class="wide">搜索胶片<input id="stock-search" placeholder="搜索型号、厂牌、ISO…"></label><input name="stock" type="hidden" value="portra400"><div class="wide stock-filters"><label>规格${select(
+    )}</label>${field('camera', '相机', defaults.camera || '')}${dateFields()}<section class="wide roll-location-editor" data-new-roll-location>${locationPickerFields('location', {}, { split: true })}</section><label class="wide">搜索胶片<input id="stock-search" placeholder="搜索型号、厂牌、ISO…"></label><input name="stock" type="hidden" value="portra400"><div class="wide stock-filters"><label>规格${select(
       'stockFormat',
       [
         ['all', '全部规格'],
@@ -1174,12 +1656,16 @@ function newRoll() {
       ],
       'all',
       'id="stock-type-filter"',
-    )}</label><label>厂牌${select('stockBrand', [['all', '全部厂牌'], ...[...new Set(Object.values(STOCKS).map((s) => s.brand))].sort().map((v) => [v, v])], 'all', 'id="stock-brand-filter"')}</label><button type="button" data-action="custom-stock">＋ 添加未收录胶片</button></div><p id="stock-count" class="wide"></p><div class="wide stock-picker" id="stock-picker"></div></div>`,
+    )}</label><label>厂牌${select('stockBrand', [['all', '全部厂牌'], ...[...new Set(Object.values(STOCKS).map((s) => s.brand))].sort().map((v) => [v, v])], 'all', 'id="stock-brand-filter"')}</label><button type="button" class="soft" data-action="custom-stock">＋ 添加未收录胶片</button></div><p id="stock-count" class="wide"></p><div class="wide stock-picker" id="stock-picker"></div></div>`,
     async (form) => {
       const v = formValues(form),
         row = await api('/rolls', {
           method: 'POST',
-          body: { ...v, datePrecision: v.datePrecision },
+          body: {
+            ...presets.find((preset) => preset.id === v.rollPreset)?.metadata,
+            ...v,
+            ...rollLocationPatch(v),
+          },
         });
       STATE.entities.set(row.id, row);
       await bootstrap();
@@ -1190,6 +1676,23 @@ function newRoll() {
     '创建胶卷',
     'NEW FILM ROLL',
   );
+  const locationHost = $('#editor-body').querySelector('[data-new-roll-location]'),
+    mapPreferences = STATE.boot.lists.settings || {};
+  let disposeLocation = mountLocationPicker(locationHost, { api, preferences: mapPreferences });
+  $('#editor').addEventListener('close', () => disposeLocation(), { once: true });
+  $('#editor-form [name="rollPreset"]').onchange = (event) => {
+    const preset = presets.find((item) => item.id === event.target.value);
+    if (!preset) return;
+    const form = event.target.form;
+    for (const key of ['camera', 'format', 'stock']) {
+      if (preset.metadata[key]) form.elements[key].value = preset.metadata[key];
+    }
+    disposeLocation();
+    locationHost.innerHTML = locationPickerFields('location', preset.metadata, { split: true });
+    disposeLocation = mountLocationPicker(locationHost, { api, preferences: mapPreferences });
+    form.querySelector('[name=format]').dispatchEvent(new Event('change'));
+    renderStocks('');
+  };
   renderStocks('');
   $('#stock-search').oninput = (e) => renderStocks(e.target.value);
   for (const id of ['#stock-format-filter', '#stock-type-filter', '#stock-brand-filter'])
@@ -1272,8 +1775,10 @@ function renderProjects() {
   $('#pagination').hidden = true;
 }
 let projectItems = [];
-async function renderCanvas() {
-  projectItems = await api('/projects/' + STATE.projectId + '/items');
+async function renderCanvas(request = STATE.request) {
+  const items = await api('/projects/' + STATE.projectId + '/items');
+  if (request !== STATE.request) return;
+  projectItems = items;
   const html = projectItems
     .map(
       (item) =>
@@ -1285,7 +1790,7 @@ async function renderCanvas() {
     : '<div class="empty">先从看片台选择照片加入项目，再来策展<button class="soft" data-action="all-photos">浏览全库照片</button></div>';
   $('#pagination').hidden = true;
 }
-async function renderStorage() {
+async function renderStorage(request) {
   const tab = STATE.storageTab;
   $('#pagination').hidden = true;
   $('#selection-bar').hidden = true;
@@ -1293,7 +1798,7 @@ async function renderStorage() {
   const stats = STATE.boot.stats || {};
   if (tab === 'overview') {
     const health = STATE.boot.error ? null : await api('/health');
-    html = `<div class="stats-grid">${[
+    html = `<section class="section-card library-next"><header><h2>待处理事项</h2></header><div class="inspector-actions"><button data-action="job-previews">补齐预览 · ${health?.previews?.missing || 0}</button><button data-action="scope" data-value="offline">离线 / 断链 · ${health?.offline || 0}</button><button data-action="storage-tab" data-value="backups">查看并核验备份</button></div>${(health?.previews?.affectedRolls || []).map((roll) => `<div class="storage-row"><div><b>${E(roll.name)}</b><p>${[roll.missing && roll.missing + ' 个大预览待补', roll.disconnected && roll.disconnected + ' 个原片需检查'].filter(Boolean).join(' · ')}</p></div><button data-action="roll-photos" data-value="${E(roll.id)}">看整卷</button>${roll.missing ? `<button data-action="roll-previews" data-value="${E(roll.id)}">补齐这卷</button>` : ''}</div>`).join('')}</section><div class="stats-grid">${[
       ['胶卷', stats.rolls || 0],
       ['影像', stats.photos || 0],
       ['原片占用', bytes(health?.bytes || 0)],
@@ -1312,7 +1817,7 @@ async function renderStorage() {
       '/backups' + (STATE.backupRoot ? '?root=' + encodeURIComponent(STATE.backupRoot) : ''),
     );
     STATE.backupRoot = backups.root;
-    html = `<section class="section-card"><header><h2>可校验的原片备份</h2><button class="primary" data-action="backup">创建增量备份</button></header><p>每次保存独立目录快照，已备份的相同原片对象会复用。恢复先验证内容，再写入新的资料库文件夹。</p><div class="query-bar" style="padding:0;border:0;background:none"><input id="backup-root" value="${E(backups.root)}" aria-label="备份位置"><button class="soft" data-action="backup-root">读取此位置</button></div></section><section class="section-card"><header><h2>备份快照</h2><small>${backups.items.length} 个</small></header>${backups.items.map((b) => `<div class="backup-row"><div><b>${E(b.title)}</b> <span class="badge ${b.complete ? '' : 'bad'}">${b.complete ? '原片完整' : '缺失 ' + b.missing + ' 个原片'}</span><p>${new Date(b.createdAt).toLocaleString('zh-CN')} · ${b.files} 个文件 · 本次新增 ${bytes(b.newBytes)}</p></div><button class="soft" data-action="verify-backup" data-value="${b.id}">验证与恢复预览</button></div>`).join('') || '<p>还没有备份。选择本地、移动硬盘或 NAS 文件夹创建第一份快照。</p>'}</section>`;
+    html = `<section class="section-card"><header><h2>可校验的原片备份</h2><button class="primary" data-action="backup">创建增量备份</button></header><p>每次保存独立目录快照，已备份的相同原片对象会复用。恢复先验证内容，再写入新的资料库文件夹。</p><div class="query-bar" style="padding:0;border:0;background:none"><input id="backup-root" value="${E(backups.root)}" aria-label="备份位置"><button class="soft" data-action="backup-root">读取此位置</button></div></section><section class="section-card"><header><h2>备份快照</h2><small>${backups.items.length} 个</small></header>${backups.items.map((b) => `<div class="backup-row"><div><b>${E(b.title)}</b> <span class="badge ${b.complete ? '' : 'bad'}">${b.complete ? '原片完整' : '缺失 ' + b.missing + ' 个原片'}</span><p>${new Date(b.createdAt).toLocaleString('zh-CN')} · ${b.files} 个文件 · 本次新增 ${bytes(b.newBytes)} · ${b.verification?.state === 'completed' ? '已校验 ' + new Date(b.verification.time).toLocaleDateString('zh-CN') : b.verification?.state === 'failed' ? '校验失败' : '待校验'}</p></div><button class="soft" data-action="verify-backup" data-value="${b.id}">验证与恢复预览</button></div>`).join('') || '<p>还没有备份。选择本地、移动硬盘或 NAS 文件夹创建第一份快照。</p>'}</section>`;
     STATE.backups = backups.items;
   }
   if (tab === 'history') {
@@ -1352,9 +1857,9 @@ async function renderStorage() {
           .map((c) => [c.code, c.name]),
       ],
       settings.mapDefaultCountry || 'CN',
-    )}</label><label>底图地址<input name="mapTileURL" value="${E(settings.mapTileURL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png')}"></label></div><p>地图采用 WGS84 坐标，在线底图可缩放至县城和街道。可填写支持 {z}/{x}/{y} 的自有瓦片服务；地名查询只在主动查找时联网。</p><button data-action="save-map-preferences" class="primary">保存地图设置</button></section><section class="section-card"><h2>布局与键盘</h2><p>拖动两侧分隔线调整宽度，可按工作区保存布局。⌘K 搜索和执行命令；1 / 2 切换档案馆和看片台，C 对比所选，Tab 在对比照片间切换，F 适合、Z 原像素、I EXIF、H 直方图、X 淘汰。</p><button class="soft" data-action="save-layout">保存当前工作区布局</button></section>`;
+    )}</label><label>底图地址<input name="mapTileURL" value="${E(settings.mapTileURL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png')}"></label></div><p>地图采用 WGS84 坐标，在线底图可缩放至县城和街道。可填写支持 {z}/{x}/{y} 的自有瓦片服务；地名查询只在主动查找时联网。</p><button data-action="save-map-preferences" class="primary">保存地图设置</button></section><section class="section-card"><h2>布局与键盘</h2><p>拖动两侧分隔线调整宽度，可按工作区保存布局。⌘K 搜索和执行命令；1 / 2 切换档案馆和看片台，C 对比所选，Tab 在对比照片间切换，F 适合、Z 原像素、I 信息、X 淘汰。</p><button class="soft" data-action="save-layout">保存当前工作区布局</button></section>`;
   }
-  $('#view-content').innerHTML = html;
+  if (request === STATE.request) $('#view-content').innerHTML = html;
 }
 function bars(rows, label) {
   const max = Math.max(1, ...rows.map((r) => r.count));
@@ -1393,7 +1898,8 @@ async function pollJobs() {
         }
         if (j.kind === 'upload') {
           await bootstrap();
-          refresh();
+          await refresh();
+          if (STATE.focus?.entity === 'photos') await inspect(STATE.focus.id, 'photos');
         }
         if (
           STATE.workspace === 'storage' &&
@@ -1454,7 +1960,19 @@ function showRestorePreview(snapshotId, result) {
   );
 }
 async function renderAtlas() {
-  const view = atlas.getView();
+  const focusId = STATE.mapFocusId,
+    coordinates = STATE.mapFocusCoordinates,
+    assignId = STATE.mapAssignId,
+    restoreView = STATE.mapRestoreView,
+    view =
+      restoreView ||
+      (coordinates
+        ? { center: [coordinates.latitude, coordinates.longitude], zoom: 8 }
+        : atlas.getView());
+  STATE.mapFocusId = null;
+  STATE.mapFocusCoordinates = null;
+  STATE.mapAssignId = null;
+  STATE.mapRestoreView = null;
   atlas.destroy();
   $('#pagination').hidden = true;
   $('#selection-bar').hidden = true;
@@ -1463,11 +1981,11 @@ async function renderAtlas() {
     facets: STATE.boot.facets || {},
     preferences: STATE.boot.lists.settings || {},
     view,
-    focusId: STATE.mapFocusId,
-    assignId: STATE.mapAssignId,
+    focusId,
+    focusCoordinates: coordinates,
+    recenterFocus: !restoreView,
+    assignId,
   });
-  STATE.mapFocusId = null;
-  STATE.mapAssignId = null;
 }
 function chooseImport(targetRoll = null, targetPhoto = null) {
   STATE.importTargetRoll = targetRoll;
@@ -1478,7 +1996,12 @@ function chooseImport(targetRoll = null, targetPhoto = null) {
 }
 function showImportWizard() {
   const presets = STATE.boot.lists.presets || [],
-    files = STATE.importFiles,
+    pathOf = (file) => file.webkitRelativePath || file.name,
+    files = [...STATE.importFiles].sort((a, b) =>
+      pathOf(a).localeCompare(pathOf(b), undefined, { numeric: true }),
+    ),
+    plans = new Map(),
+    duplicateChecks = new Map(),
     groups = new Set(
       files.map(
         (file) =>
@@ -1487,19 +2010,7 @@ function showImportWizard() {
     );
   modal(
     STATE.importTargetPhoto ? '加入新的扫描版本' : '批量装入影像',
-    `<div class="import-drop"><div>${!STATE.importTargetRoll && !STATE.importTargetPhoto ? '<button type="button" class="soft" data-action="new-storage">引用外置盘目录</button>' : ''}<button type="button" class="soft" data-action="pick-files">选择文件</button><button type="button" class="soft" data-action="pick-folder">选择文件夹</button></div><p>${files.length ? files.length.toLocaleString() + ' 个文件 · ' + bytes(files.reduce((n, f) => n + f.size, 0)) + ' · ' + groups.size + ' 个来源文件夹' : '这些照片会复制到资料库；外置盘原片不想复制时，请使用“引用外置盘目录”'}</p></div>${
-      files.length
-        ? `<div class="import-list">${files
-            .slice(0, 120)
-            .map(
-              (file) =>
-                `<div class="import-row"><span>${E(file.webkitRelativePath || file.name)}</span><small>${bytes(file.size)}</small></div>`,
-            )
-            .join(
-              '',
-            )}${files.length > 120 ? '<p class="form-note">仅预览前 120 个文件，导入包含全部选择。</p>' : ''}</div>`
-        : ''
-    }<div class="form-grid"><label>导入模板${select('preset', [['', '手动填写'], ...presets.map((p) => [p.id, p.name])], '', 'id="import-preset"')}</label><label>重复文件${select(
+    `<div class="import-drop"><div>${!STATE.importTargetRoll && !STATE.importTargetPhoto ? '<button type="button" class="soft" data-action="new-storage">引用外置盘目录</button>' : ''}<button type="button" class="soft" data-action="pick-files">选择文件</button><button type="button" class="soft" data-action="pick-folder">选择文件夹</button></div><p>${files.length ? files.length.toLocaleString() + ' 个文件 · ' + bytes(files.reduce((n, f) => n + f.size, 0)) + ' · ' + groups.size + ' 个来源文件夹' : '这些照片会复制到资料库；外置盘原片不想复制时，请使用“引用外置盘目录”'}</p></div><div data-import-plan></div>${files.length ? '<p class="form-note">重扫归入已有格号。文件内容重复按下方规则在上传时核对。</p>' : ''}<div class="form-grid"><label>导入模板${select('preset', [['', '手动填写'], ...presets.map((p) => [p.id, p.name])], '', 'id="import-preset"')}</label><label>重复文件${select(
       'dedup',
       [
         ['skip', '跳过哈希完全相同的文件'],
@@ -1533,7 +2044,7 @@ function showImportWizard() {
       'format',
       ['135', '120 · 6×4.5', '120 · 6×6', '120 · 6×7', '120 · 6×9'].map((v) => [v, v]),
       '135',
-    )}</label>${field('camera', '相机', '')}${field('lens', '镜头', '')}${field('location', '地点', '')}${field('date', '拍摄日期', '', 'date')}${field('project', '拍摄项目', '')}<label>扫描版本类型${select(
+    )}</label>${field('camera', '相机', '')}${field('lens', '镜头', '')}${STATE.importTargetRoll || STATE.importTargetPhoto ? '' : `<details class="wide roll-location-editor" data-import-location><summary>设置胶卷地点</summary><div data-import-location-fields>${locationPickerFields('location')}</div></details>`}${dateFields()}${field('project', '拍摄项目', '')}<label class="wide"><input name="useFileDate" type="checkbox"> 文件 EXIF 日期是实际拍摄日期</label><label>扫描版本类型${select(
       'kind',
       [
         ['scan', '扫描原版'],
@@ -1546,12 +2057,26 @@ function showImportWizard() {
     async (form) => {
       if (!STATE.importFiles.length) throw new Error('请先选择照片或视频');
       const v = formValues(form),
+        numbers = proposedFrames(),
+        presetMetadata = presets.find((preset) => preset.id === v.preset)?.metadata || {},
         metadata = Object.fromEntries(
-          ['name', 'stock', 'format', 'camera', 'lens', 'location', 'date', 'project'].map((k) => [
-            k,
-            v[k] || '',
-          ]),
+          [
+            'name',
+            'stock',
+            'format',
+            'camera',
+            'lens',
+            'location',
+            'date',
+            'datePrecision',
+            'project',
+          ].map((k) => [k, v[k] || '']),
         );
+      for (const key of ['exposureIndex', 'processType', 'lab', 'process']) {
+        if (presetMetadata[key] !== undefined) metadata[key] = presetMetadata[key];
+      }
+      if (!STATE.importTargetRoll && !STATE.importTargetPhoto)
+        Object.assign(metadata, rollLocationPatch(v));
       if (v.presetName.trim())
         await api('/presets', { method: 'POST', body: { name: v.presetName.trim(), metadata } });
       const record = await api('/imports', {
@@ -1560,12 +2085,15 @@ function showImportWizard() {
           name: STATE.importTargetPhoto
             ? '加入扫描版本'
             : '批量导入 ' + STATE.importFiles.length + ' 个文件',
-          files: STATE.importFiles.map((file) => ({
-            path: file.webkitRelativePath || file.name,
+          files: files.map((file) => ({
+            path: pathOf(file),
+            ...plans.get(file),
+            frameNo: numbers.get(file),
             size: file.size,
             mtime: file.lastModified,
           })),
           metadata,
+          useFileDate: v.useFileDate === 'on',
           dedup: v.dedup,
           groupMode: v.groupMode,
           numbering: v.numbering,
@@ -1581,13 +2109,171 @@ function showImportWizard() {
     '开始导入',
     'IMPORT DESK',
   );
+  const form = $('#editor-form'),
+    planHost = form.querySelector('[data-import-plan]'),
+    rollId = STATE.importTargetRoll,
+    targetPhoto = STATE.importTargetPhoto;
+  let existingFrames = [],
+    planPage = 0,
+    checkingDuplicates = false;
+  function proposedFrames() {
+    const totals = new Map(),
+      initial = rollId ? Math.max(-1, ...existingFrames.map((photo) => photo.position)) + 1 : 0;
+    return new Map(
+      files.map((file) => {
+        const plan = plans.get(file);
+        if (targetPhoto || plan?.targetPhoto) return [file, ''];
+        const folder =
+          form.elements.groupMode?.value === 'folders'
+            ? pathOf(file).split('/').slice(0, -1).join('/')
+            : '';
+        const order = (totals.get(folder) || initial) + 1;
+        totals.set(folder, order);
+        const detected =
+          form.elements.numbering.value === 'filename'
+            ? file.name.match(/(?:^|[ _-])(\d{1,3}[a-z]?)(?=\.[^.]+$)/i)?.[1]
+            : '';
+        return [file, plan?.frameNo || detected || String(order).padStart(2, '0')];
+      }),
+    );
+  }
+  function renderPlan() {
+    const start = planPage * 40,
+      groupMode = form.elements.groupMode?.value,
+      rollName = STATE.entities.get(rollId)?.name || '当前胶卷',
+      numbers = proposedFrames();
+    planHost.innerHTML = files.length
+      ? `<div class="import-plan-head"><b>导入预演</b><button type="button" data-plan-page="-1" ${planPage ? '' : 'disabled'}>‹ 上页</button><span>${planPage + 1} / ${Math.ceil(files.length / 40)}</span><button type="button" data-plan-page="1" ${start + 40 < files.length ? '' : 'disabled'}>下页 ›</button><button type="button" class="soft" data-check-duplicates ${checkingDuplicates ? 'disabled' : ''}>${checkingDuplicates ? '核对中…' : '核对本页重复文件'}</button></div><div class="import-plan">${files
+          .slice(start, start + 40)
+          .map((file, i) => {
+            const index = start + i,
+              plan = plans.get(file) || {},
+              path = pathOf(file),
+              folder = path.split('/').slice(0, -1).at(-1),
+              group = targetPhoto
+                ? '当前底片的扫描版本'
+                : rollId
+                  ? rollName
+                  : groupMode === 'folders' && folder
+                    ? folder
+                    : form.elements.name?.value || '导入胶卷';
+            return `<div class="import-plan-row" data-plan-index="${index}"><div><b>${E(file.name)}</b><small>${E(group)}</small>${duplicateChecks.has(file) ? `<small>${duplicateChecks.get(file) ? '内容重复' : '未发现相同内容'}</small>` : ''}</div>${targetPhoto ? '' : `<label>格号<input data-plan-frame aria-label="格号" maxlength="24" value="${E(plan.frameNo || '')}" placeholder="${E(numbers.get(file))}" ${plan.targetPhoto ? 'disabled' : ''}></label>${rollId ? `<label>导入方式${select('planTarget', [['', '新底片'], ...existingFrames.map((photo) => [photo.id, '重扫 · ' + photo.frameNo + ' · ' + photo.name])], plan.targetPhoto)}</label>` : ''}`}<div class="import-plan-order"><button type="button" data-plan-move="-1" aria-label="上移" ${index ? '' : 'disabled'}>↑</button><button type="button" data-plan-move="1" aria-label="下移" ${index < files.length - 1 ? '' : 'disabled'}>↓</button></div></div>`;
+          })
+          .join('')}</div>`
+      : '';
+  }
+  planHost.oninput = (event) => {
+    if (!event.target.hasAttribute('data-plan-frame')) return;
+    const file = files[Number(event.target.closest('[data-plan-index]').dataset.planIndex)];
+    plans.set(file, { ...plans.get(file), frameNo: event.target.value.trim() });
+  };
+  planHost.onchange = (event) => {
+    if (event.target.name !== 'planTarget') return;
+    const row = event.target.closest('[data-plan-index]'),
+      file = files[Number(row.dataset.planIndex)];
+    plans.set(file, { ...plans.get(file), targetPhoto: event.target.value });
+    renderPlan();
+  };
+  planHost.onclick = async (event) => {
+    if (event.target.closest('[data-check-duplicates]')) {
+      if (checkingDuplicates) return;
+      checkingDuplicates = true;
+      renderPlan();
+      try {
+        const pageFiles = files.slice(planPage * 40, planPage * 40 + 40),
+          checks = [];
+        for (const file of pageFiles) {
+          const hasher = new Sha256();
+          for (let offset = 0; offset < file.size; offset += 8 * 1024 * 1024) {
+            if (!planHost.isConnected || !$('#editor').open) return;
+            hasher.update(await file.slice(offset, offset + 8 * 1024 * 1024).arrayBuffer());
+          }
+          checks.push({ hash: hasher.hex(), size: file.size });
+        }
+        const matches = await api('/imports/check-duplicates', {
+          method: 'POST',
+          body: { files: checks },
+        });
+        const counts = new Map();
+        for (const { hash } of checks) counts.set(hash, (counts.get(hash) || 0) + 1);
+        pageFiles.forEach((file, i) =>
+          duplicateChecks.set(file, matches[i] || counts.get(checks[i].hash) > 1),
+        );
+      } catch (error) {
+        if (planHost.isConnected && $('#editor').open) toast(error.message, 'warning');
+      } finally {
+        checkingDuplicates = false;
+        if (planHost.isConnected && $('#editor').open) renderPlan();
+      }
+      return;
+    }
+    const paging = event.target.closest('[data-plan-page]'),
+      moving = event.target.closest('[data-plan-move]');
+    if (paging) planPage += Number(paging.dataset.planPage);
+    if (moving) {
+      const index = Number(moving.closest('[data-plan-index]').dataset.planIndex),
+        destination = index + Number(moving.dataset.planMove);
+      [files[index], files[destination]] = [files[destination], files[index]];
+      planPage = Math.floor(destination / 40);
+    }
+    if (paging || moving) renderPlan();
+  };
+  for (const name of ['groupMode', 'numbering', 'name']) {
+    if (form.elements[name]) form.elements[name].onchange = renderPlan;
+  }
+  renderPlan();
+  if (rollId && files.length) {
+    api(
+      '/photos?filter=' + encodeURIComponent(JSON.stringify({ rollId, sort: 'frame', limit: 200 })),
+    )
+      .then((result) => {
+        if (!planHost.isConnected) return;
+        existingFrames = result.items;
+        renderPlan();
+      })
+      .catch((error) => toast(error.message, 'warning'));
+  }
+  const importLocation = form.querySelector('[data-import-location]');
+  let disposeImportLocation;
+  if (importLocation) {
+    const mountImportLocation = () => {
+      if (importLocation.open && !disposeImportLocation)
+        disposeImportLocation = mountLocationPicker(importLocation, {
+          api,
+          preferences: STATE.boot.lists.settings || {},
+        });
+    };
+    importLocation.addEventListener('toggle', mountImportLocation);
+    $('#editor').addEventListener('close', () => disposeImportLocation?.(), { once: true });
+  }
   const preset = $('#import-preset');
   if (preset)
     preset.onchange = (event) => {
       const p = presets.find((p) => p.id === event.target.value);
       if (!p) return;
+      const form = $('#editor-form');
+      form.querySelector('.date-fields').outerHTML = dateFields(
+        p.metadata.date,
+        p.metadata.datePrecision,
+      );
+      if (importLocation) {
+        disposeImportLocation?.();
+        disposeImportLocation = null;
+        importLocation.querySelector('[data-import-location-fields]').innerHTML =
+          locationPickerFields('location', p.metadata);
+        if (p.metadata.location || rollCoordinates(p.metadata)) importLocation.open = true;
+        if (importLocation.open)
+          disposeImportLocation = mountLocationPicker(importLocation, {
+            api,
+            preferences: STATE.boot.lists.settings || {},
+          });
+      }
       for (const [key, value] of Object.entries(p.metadata))
-        if ($('#editor-form').elements[key]) $('#editor-form').elements[key].value = value;
+        if (
+          !['date', 'datePrecision', 'location', 'latitude', 'longitude'].includes(key) &&
+          form.elements[key]
+        )
+          form.elements[key].value = value;
     };
 }
 async function uploadBatch(id) {
@@ -1773,13 +2459,12 @@ function selectCommand(index) {
   $('#command-dialog').close();
   Promise.resolve(command.run()).catch((e) => toast(e.message, 'warning'));
 }
-function reviewOptions() {
-  let page = STATE.page;
-  const query = { ...resultQuery() };
+function reviewOptions(result = STATE.result, query = resultQuery()) {
+  let page = query.page || 0;
   return {
-    page: STATE.page,
-    pages: STATE.result.pages || 1,
-    candidates: STATE.result.items,
+    page,
+    pages: result.pages || 1,
+    candidates: result.items,
     loadCandidates: async (delta) => {
       const next = page + delta;
       if (next < 0) return [];
@@ -1793,7 +2478,7 @@ function reviewOptions() {
     },
   };
 }
-async function openPhoto(id) {
+async function openPhoto(id, options) {
   let photo = STATE.entities.get(id);
   if (!photo?.mediaId) {
     photo = await api('/photos/' + encodeURIComponent(id));
@@ -1802,14 +2487,21 @@ async function openPhoto(id) {
   STATE.focus = { id, entity: 'photos' };
   reviewer.open(
     [photo],
-    STATE.workspace === 'lighttable' || STATE.workspace === 'projects'
-      ? reviewOptions()
-      : { candidates: [photo] },
+    options ||
+      (STATE.workspace === 'lighttable' || STATE.workspace === 'projects'
+        ? reviewOptions()
+        : { candidates: [photo] }),
   );
 }
 async function action(name, value, element) {
   if (['scope', 'open-storage'].includes(name) && element?.closest('#editor')) $('#editor').close();
   switch (name) {
+    case 'nav-back':
+      if (navigationEntry?.index > 0) history.back();
+      break;
+    case 'nav-forward':
+      if (navigationEntry && navigationEntry.index < navigationEnd) history.forward();
+      break;
     case 'home':
       navigate('archive');
       break;
@@ -1849,12 +2541,7 @@ async function action(name, value, element) {
       });
       break;
     case 'view':
-      STATE.view = value;
-      STATE.page = 0;
-      $('#view-content').scrollTop = 0;
-      clearSelection();
-      renderHeader();
-      refresh();
+      if (value !== STATE.view) navigate(STATE.workspace, STATE.query, { view: value });
       break;
     case 'multi':
       STATE.multi = !STATE.multi;
@@ -1878,6 +2565,13 @@ async function action(name, value, element) {
       break;
     case 'remove-rule':
       element.closest('.rule-row').remove();
+      break;
+    case 'remove-query-filter':
+      delete STATE.query[value];
+      STATE.page = 0;
+      clearSelection();
+      renderQuery();
+      refresh();
       break;
     case 'reset-filters': {
       const keep = {
@@ -1973,6 +2667,9 @@ async function action(name, value, element) {
         await trashSelected();
       }
       break;
+    case 'archive-more':
+      await loadArchiveMore();
+      break;
     case 'page-prev':
       if (STATE.page > 0) {
         STATE.page--;
@@ -2060,6 +2757,25 @@ async function action(name, value, element) {
       STATE.inspectorTab = value;
       if (STATE.focus) await inspect(STATE.focus.id, STATE.focus.entity, value);
       break;
+    case 'save-roll-date': {
+      const container = element.closest('.inspector-date'),
+        date = container.querySelector('[name="date"]');
+      if (date.reportValidity())
+        await saveRollDate(
+          STATE.focus.id,
+          date.value,
+          container.querySelector('[data-date-precision]').value,
+        );
+      break;
+    }
+    case 'edit-roll-date': {
+      const roll = STATE.entities.get(value);
+      modal('编辑拍摄日期', dateFields(roll.date, roll.datePrecision), async (form) => {
+        const { date, datePrecision } = formValues(form);
+        await saveRollDate(roll.id, date, datePrecision);
+      });
+      break;
+    }
     case 'roll-photos':
       STATE.entities.set(
         value,
@@ -2073,6 +2789,28 @@ async function action(name, value, element) {
         await inspect(p.roll_id, 'rolls');
       }
       break;
+    case 'photo-location': {
+      const photo = STATE.entities.get(STATE.focus.id);
+      modal(
+        '设置照片拍摄位置',
+        '<div class="batch-edit" data-photo-location>' + locationPickerFields() + '</div>',
+        async (form) => {
+          const v = formValues(form),
+            coordinates = rollCoordinates(v);
+          if (!coordinates) throw Error('请在地图上设置地点');
+          await patchRecord('photos', photo.id, { ...coordinates, placeName: v.value.trim() });
+          refresh();
+        },
+      );
+      const host = $('#editor-body').querySelector('[data-photo-location]');
+      host.querySelector('[name=value]').value = photo.placeName || '';
+      const dispose = mountLocationPicker(host, {
+        api,
+        preferences: STATE.boot.lists.settings || {},
+      });
+      $('#editor').addEventListener('close', dispose, { once: true });
+      break;
+    }
     case 'locate-negative': {
       const p = STATE.entities.get(STATE.focus.id),
         r = await api('/rolls/' + encodeURIComponent(p.roll_id));
@@ -2080,7 +2818,42 @@ async function action(name, value, element) {
       STATE.focus = { id: r.id, entity: 'rolls' };
       STATE.inspectorTab = 'physical';
       renderInspector(r, 'rolls');
+      const location = document.createElement('p');
+      location.className = 'negative-frame-location';
+      location.textContent = [p.strip && '底片条 ' + p.strip, p.frameNo && '格号 ' + p.frameNo]
+        .filter(Boolean)
+        .join(' · ');
+      if (location.textContent) $('.inspector-body').prepend(location);
       $('.inspector').classList.add('mobile-open');
+      break;
+    }
+    case 'save-film-preset': {
+      const roll = STATE.entities.get(STATE.focus.id);
+      const keys = [
+        'stock',
+        'format',
+        'camera',
+        'lens',
+        'location',
+        'project',
+        'exposureIndex',
+        'processType',
+        'lab',
+        'process',
+      ];
+      const metadata = Object.fromEntries(keys.map((key) => [key, roll[key]]));
+      modal(
+        '保存胶卷模板',
+        field('name', '模板名称', roll.name, 'text', 'required'),
+        async (form) => {
+          await api('/presets', {
+            method: 'POST',
+            body: { name: formValues(form).name, metadata },
+          });
+          await bootstrap();
+          toast('胶卷模板已保存');
+        },
+      );
       break;
     }
     case 'rate':
@@ -2108,6 +2881,9 @@ async function action(name, value, element) {
           mime: v.mime,
           availability: v.availability,
           versionName: v.name,
+          versionId: v.id,
+          size: v.size,
+          fileDateSource: v.fileDateSource,
           exif: v.exif || p.exif,
         },
       ]);
@@ -2124,6 +2900,9 @@ async function action(name, value, element) {
           mime: v.mime,
           availability: v.availability,
           versionName: v.name,
+          versionId: v.id,
+          size: v.size,
+          fileDateSource: v.fileDateSource,
           exif: v.exif || p.exif,
         })),
       );
@@ -2304,11 +3083,7 @@ async function action(name, value, element) {
       await pollJobs();
       break;
     case 'storage-tab':
-      STATE.storageTab = value;
-      clearSelection();
-      renderHeader();
-      renderQuery();
-      refresh();
+      if (value !== STATE.storageTab) navigate('storage', {}, { storageTab: value });
       break;
     case 'open-recovery':
       navigate('storage', {}, { storageTab: 'backups' });
@@ -2365,6 +3140,9 @@ async function action(name, value, element) {
       break;
     case 'job-index':
       await job('index', { all: true, force: true });
+      break;
+    case 'roll-previews':
+      await job('previews', { selection: { query: { rollId: value } } }, '补齐胶卷预览');
       break;
     case 'job-previews':
       await showOfflineHelp(true);
@@ -2524,10 +3302,7 @@ async function action(name, value, element) {
       });
       break;
     case 'yearbook':
-      navigate('lighttable');
-      STATE.view = 'yearbook';
-      renderHeader();
-      refresh();
+      navigate('lighttable', {}, { view: 'yearbook' });
       break;
     case 'export-yearbook':
       await job('pdf', {
@@ -2535,6 +3310,58 @@ async function action(name, value, element) {
         selection: selection(),
       });
       break;
+    case 'roll-contact-pdf': {
+      const roll = STATE.entities.get(STATE.query.rollId);
+      await job('pdf', {
+        mode: 'contact',
+        rollId: roll.id,
+        title: roll.name + ' · 接触印样',
+        selection: { query: { rollId: roll.id, sort: 'frame' } },
+      });
+      break;
+    }
+    case 'project-contact':
+      await job('pdf', {
+        mode: 'contact',
+        title: '定稿接触印样',
+        selection: { query: { projectId: STATE.projectId, stage: 'final' } },
+      });
+      break;
+    case 'project-book': {
+      const projectId = STATE.projectId,
+        title = STATE.boot.lists.projects.find((p) => p.id === projectId)?.name || '摄影项目',
+        result = await api(
+          '/photos?filter=' +
+            encodeURIComponent(
+              JSON.stringify({ projectId, stage: 'final', type: 'image', limit: 200 }),
+            ),
+        );
+      if (!result.total) throw Error('请先将照片标为定稿');
+      if (result.total > 200) throw Error('每册最多 200 页，请分批整理定稿');
+      const pages = result.items.map((photo) => ({
+        background: '#ffffff',
+        elements: [
+          {
+            id: photo.id,
+            type: 'image',
+            photoId: photo.id,
+            mediaId: photo.mediaId,
+            name: photo.name,
+            x: 8,
+            y: 8,
+            w: 194,
+            h: 194,
+            fit: 'contain',
+          },
+        ],
+      }));
+      const book = await api('/books', {
+        method: 'POST',
+        body: { name: title, width: 210, height: 210, pages },
+      });
+      await bookDesigner.open(book.id);
+      break;
+    }
     case 'project-export':
       await job('pdf', {
         title:
@@ -2543,10 +3370,12 @@ async function action(name, value, element) {
       });
       break;
     case 'project-view':
-      STATE.projectView = value;
-      clearSelection();
-      renderHeader();
-      refresh();
+      if (value !== STATE.projectView)
+        navigate('projects', STATE.query, {
+          projectId: STATE.projectId,
+          projectStage: STATE.projectStage,
+          projectView: value,
+        });
       break;
     case 'project-stage':
       STATE.projectStage = value;
@@ -2586,6 +3415,16 @@ async function action(name, value, element) {
       toast('抽到了 ' + r.name);
       break;
     }
+    case 'map-mode':
+      {
+        const { view, ...selection } = atlas.getNavigationState();
+        navigate(
+          'atlas',
+          { ...STATE.query, mapMode: STATE.query.mapMode === 'photos' ? 'rolls' : 'photos' },
+          { ...selection, mapView: view },
+        );
+      }
+      break;
     case 'map-place': {
       modal('选择要定位的胶卷', '<div id="map-roll-picker"></div>', null);
       const dialog = $('#editor');
@@ -2620,11 +3459,31 @@ async function action(name, value, element) {
       $('#editor').close();
       await atlas.assign(value);
       break;
+    case 'edit-roll-location': {
+      const roll = STATE.entities.get(value) || (await api('/rolls/' + encodeURIComponent(value)));
+      modal(
+        '设置胶卷地点',
+        `<section class="roll-location-editor" data-edit-roll-location>${locationPickerFields('location', roll)}<button type="button" class="text" data-location-clear>清空地点和坐标</button></section>`,
+        async (form) => {
+          await patchRecord('rolls', roll.id, rollLocationPatch(formValues(form)));
+          await bootstrap();
+          refresh();
+        },
+      );
+      const dispose = mountLocationPicker(
+        $('#editor-body').querySelector('[data-edit-roll-location]'),
+        {
+          api,
+          preferences: STATE.boot.lists.settings || {},
+        },
+      );
+      $('#editor').addEventListener('close', dispose, { once: true });
+      break;
+    }
     case 'map-selected': {
-      if (!STATE.focus) break;
-      const row = STATE.entities.get(STATE.focus.id);
-      STATE.mapFocusId = row.id;
-      navigate('atlas');
+      const row = STATE.entities.get(value || STATE.focus?.id);
+      if (!row) break;
+      navigate('atlas', {}, { mapFocusId: row.id, mapFocusCoordinates: rollCoordinates(row) });
       break;
     }
     case 'close-editor':
@@ -2676,6 +3535,8 @@ document.addEventListener('click', (event) => {
     pickRecord(record.dataset.record, record.dataset.entity, event);
 });
 document.addEventListener('dblclick', (event) => {
+  if (event.target.closest('[data-action="edit-roll-date"],[data-action="edit-roll-location"]'))
+    return;
   const record = event.target.closest('[data-record]');
   if (record && event.target.closest('[contenteditable=true]')) return;
   if (record) {
@@ -2690,6 +3551,27 @@ document.addEventListener('dblclick', (event) => {
 });
 document.addEventListener('change', (event) => {
   const control = event.target;
+  if (control.hasAttribute('data-date-precision')) {
+    const group = control.closest('.date-fields');
+    group.querySelector('.date-value').innerHTML = dateValueControl(
+      group.dataset.dateName,
+      group.dataset.dateValue,
+      control.value,
+      group.dataset.dateRequired === 'true',
+    );
+    return;
+  }
+  const dateGroup = control.closest('.date-value')?.closest('.date-fields');
+  if (dateGroup) {
+    dateGroup.dataset.dateValue = control.value;
+    return;
+  }
+  if (control.name === 'ruleField') {
+    const host = control.closest('.rule-row').querySelector('[data-rule-value]');
+    if (control.value === 'date' || host.querySelector('.date-fields'))
+      host.innerHTML = ruleValueControl(control.value);
+    return;
+  }
   if (control.dataset.filter !== undefined) {
     const key = control.dataset.filter;
     if (control.value) STATE.query[key] = control.value;
@@ -2758,7 +3640,9 @@ $('#editor-form').onsubmit = async (event) => {
     if (button.isConnected) button.disabled = false;
   }
 };
-$('#editor').addEventListener('close', () => (STATE.editor = null));
+$('#editor').addEventListener('close', (event) => {
+  if (!event.target.open) STATE.editor = null;
+});
 $('#command-input').oninput = (event) => {
   clearTimeout(commandTimer);
   STATE.commandIndex = 0;
@@ -3099,8 +3983,11 @@ document.addEventListener('keydown', async (event) => {
     toast(error.message, 'warning');
   }
 });
+history.scrollRestoration = 'manual';
 window.addEventListener('popstate', (event) => {
-  if (event.state) navigate(event.state.workspace, event.state.query, event.state.extra, false);
+  if (!event.state?.filmAlbum || !navigationEntry) return;
+  rememberNavigation();
+  openNavigation(event.state, navigationSnapshots.get(event.state.index));
 });
 async function start() {
   try {
@@ -3108,17 +3995,19 @@ async function start() {
     const params = new URLSearchParams(location.search),
       workspace = params.get('workspace') || 'archive';
     if (STATE.boot.error) {
-      navigate('storage', {}, { storageTab: 'backups' }, false);
-    } else if (params.get('roll'))
-      navigate('lighttable', { rollId: params.get('roll') }, {}, false);
+      navigate('storage', {}, { storageTab: 'backups' });
+    } else if (history.state?.filmAlbum) {
+      navigationEnd = Math.max(
+        history.state.index,
+        Number(sessionStorage.getItem(navigationEndKey)) || 0,
+      );
+      openNavigation(history.state);
+    } else if (params.get('roll')) navigate('lighttable', { rollId: params.get('roll') });
     else
       navigate(
         ['archive', 'lighttable', 'projects', 'atlas', 'storage'].includes(workspace)
           ? workspace
           : 'archive',
-        {},
-        {},
-        false,
       );
     pollJobs();
     if (DEBUG_MODE) await action('demo');
@@ -3128,6 +4017,17 @@ async function start() {
   }
 }
 start();
+window.filmAlbumDesktop
+  ?.checkForUpdate?.()
+  .then((update) => {
+    if (!update) return;
+    const banner = $('#update-banner');
+    $('#update-version').textContent = 'v' + update.version;
+    $('#update-download').href = update.url;
+    $('#update-dismiss').onclick = () => (banner.hidden = true);
+    banner.hidden = false;
+  })
+  .catch(() => {});
 
 document.addEventListener(
   'error',

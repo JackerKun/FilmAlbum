@@ -77,6 +77,9 @@ const allowed = {
     'project',
     'notes',
     'process',
+    'exposureIndex',
+    'lab',
+    'processType',
     'physical',
     'latitude',
     'longitude',
@@ -87,6 +90,8 @@ const allowed = {
   photos: new Set([
     'name',
     'frameNo',
+    'strip',
+    'placeName',
     'rating',
     'color',
     'rejected',
@@ -105,6 +110,7 @@ const allowed = {
 };
 const sqlColumns = {
   name: 'name',
+  frameNo: 'frameNo',
   rating: 'rating',
   color: 'color',
   rejected: 'rejected',
@@ -627,8 +633,19 @@ export class Catalog {
       add(`r.date>=? AND r.date<?`, `${query.year}`, `${Number(query.year) + 1}`);
     const dateColumn =
       photo && query.dateSource !== 'roll' ? "COALESCE(NULLIF(p.date,''),r.date)" : 'r.date';
-    if (query.from) add(`${dateColumn}>=?`, query.from);
-    if (query.to) add(`${dateColumn}<=?`, query.to);
+    const rollDate = photo && query.dateSource !== 'roll' ? "NULLIF(p.date,'') IS NULL" : '1',
+      monthPrecision = `(length(${dateColumn})=7 OR (${rollDate} AND json_extract(r.data,'$.datePrecision')='month'))`,
+      yearPrecision = `(length(${dateColumn})=4 OR (${rollDate} AND json_extract(r.data,'$.datePrecision')='year'))`;
+    if (query.from)
+      add(
+        `CASE WHEN ${yearPrecision} THEN substr(${dateColumn},1,4)||'-12-31' WHEN ${monthPrecision} THEN substr(${dateColumn},1,7)||'-31' ELSE ${dateColumn} END>=?`,
+        query.from,
+      );
+    if (query.to)
+      add(
+        `CASE WHEN ${yearPrecision} THEN substr(${dateColumn},1,4)||'-01-01' WHEN ${monthPrecision} THEN substr(${dateColumn},1,7)||'-01' ELSE ${dateColumn} END<=? AND ${dateColumn}<>''`,
+        query.to,
+      );
     if (query.place) add('instr(lower(r.location),lower(?))>0', String(query.place).trim());
     if (['135', '120', '220'].includes(query.medium))
       add('(r.format=? OR r.format LIKE ?)', query.medium, query.medium + '%');
@@ -775,7 +792,7 @@ export class Catalog {
       .prepare(`SELECT COUNT(*) AS n FROM ${from} WHERE ${filter.sql}`)
       .get(...filter.args).n;
     const selection = photo
-      ? `p.*,r.name AS rollName,r.code AS rollCode,r.stock,r.format,r.camera,r.lens,r.location,r.project,r.data AS rollData,m.id AS mediaId,m.availability,m.mime,m.size,m.storage_id,m.analysis,v.data AS versionData,(SELECT COUNT(*) FROM versions WHERE photo_id=p.id AND deleted_at IS NULL) AS versionCount`
+      ? `p.*,r.name AS rollName,r.code AS rollCode,r.date AS rollDate,r.stock,r.format,r.camera,r.lens,r.location,r.project,r.data AS rollData,m.id AS mediaId,m.availability,m.mime,m.size,m.storage_id,m.analysis,v.data AS versionData,(SELECT COUNT(*) FROM versions WHERE photo_id=p.id AND deleted_at IS NULL) AS versionCount`
       : `r.*,(SELECT COUNT(*) FROM photos WHERE roll_id=r.id AND deleted_at IS NULL) AS frameCount,(SELECT m.id FROM photos p INDEXED BY photos_roll JOIN rolls coverroll ON coverroll.id=p.roll_id JOIN versions v ON v.id=p.primary_version JOIN media m ON m.id=v.media_id WHERE p.roll_id=r.id AND p.deleted_at IS NULL ORDER BY CASE WHEN p.id=json_extract(coverroll.data,'$.coverId') OR m.id=json_extract(coverroll.data,'$.coverId') THEN 0 ELSE 1 END,p.rating DESC,p.position LIMIT 1) AS coverMedia`;
     const rows = this.db
       .prepare(
@@ -788,7 +805,11 @@ export class Catalog {
         if (photo) {
           dto.exif = parse(row.versionData).exif || {};
           dto.analysis = parse(row.analysis);
-          dto.physical = parse(row.rollData).physical || {};
+          const rollData = parse(row.rollData);
+          dto.physical = rollData.physical || {};
+          dto.rollDatePrecision = rollData.datePrecision;
+          dto.fileDateSource = parse(row.versionData).fileDateSource;
+          dto.rollCoordinates = rollCoordinates(rollData);
           delete dto.rollData;
           delete dto.versionData;
         }
@@ -818,6 +839,17 @@ export class Catalog {
       )
       .all(...filter.args)
       .map((row) => row.id);
+  }
+  batchTags(entity) {
+    const rolls = entity === 'rolls',
+      source = rolls ? 'rolls r' : 'photos r JOIN rolls roll ON roll.id=r.roll_id',
+      active = rolls ? 'r.deleted_at IS NULL' : 'r.deleted_at IS NULL AND roll.deleted_at IS NULL';
+    return this.db
+      .prepare(
+        `SELECT DISTINCT tag.value AS value FROM ${source}, json_each(r.data,'$.tags') tag WHERE ${active} AND tag.type='text' AND tag.value<>'' ORDER BY value COLLATE NOCASE`,
+      )
+      .all()
+      .map((row) => row.value);
   }
   batch(entity, selection, patch, label = '批量修改') {
     if (!['photos', 'rolls'].includes(entity)) fail('无效批量对象');
@@ -1116,8 +1148,10 @@ export class Catalog {
           color: '',
           rejected: 0,
           date:
-            input.exif?.date?.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3').slice(0, 10) ||
-            roll.date,
+            input.useFileDate === false
+              ? ''
+              : input.exif?.date?.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3').slice(0, 10) ||
+                (input.useFileDate ? '' : roll.date),
           primary_version: versionId,
           version: 1,
           deleted_at: null,
@@ -1136,7 +1170,12 @@ export class Catalog {
         created_at: now(),
         version: 1,
         deleted_at: null,
-        data: json({ type: input.type || 'image', exif: input.exif || {} }),
+        data: json({
+          type: input.type || 'image',
+          exif: input.exif || {},
+          fileDateSource:
+            input.useFileDate === false ? 'scan' : input.useFileDate ? 'capture' : undefined,
+        }),
       });
       this.indexPhoto(id);
       this.record(created ? '装入底片' : '加入扫描版本', [
@@ -1222,7 +1261,45 @@ export class Catalog {
         .all(),
     };
   }
+  atlasPhotos(query) {
+    const filter = this.filters(query, 'photos'),
+      exif = "json_extract(v.data,'$.exif')",
+      coordinates = `CASE WHEN filmalbum_has_coordinates(p.data)=1 THEN p.data WHEN filmalbum_has_coordinates(${exif})=1 THEN ${exif} END`,
+      points = `WITH candidates AS (
+        SELECT p.id, p.name, p.roll_id AS rollId, m.id AS mediaId, ${coordinates} AS coordinates
+        FROM photos p JOIN rolls r ON r.id=p.roll_id LEFT JOIN versions v ON v.id=p.primary_version LEFT JOIN media m ON m.id=v.media_id
+        WHERE ${filter.sql}
+      ), points AS (
+        SELECT id,name,rollId,mediaId,CAST(json_extract(coordinates,'$.latitude') AS REAL) AS latitude,
+          CAST(json_extract(coordinates,'$.longitude') AS REAL) AS longitude
+        FROM candidates WHERE coordinates IS NOT NULL
+      )`,
+      bounds = query.bounds,
+      where = bounds ? 'WHERE longitude BETWEEN ? AND ? AND latitude BETWEEN ? AND ?' : '',
+      args = bounds
+        ? [...filter.args, ...[bounds.west, bounds.east, bounds.south, bounds.north].map(Number)]
+        : filter.args;
+    if (query.points)
+      return {
+        items: this.db
+          .prepare(`${points} SELECT * FROM points ${where} ORDER BY name,id LIMIT 200`)
+          .all(...args),
+      };
+    const cell = 360 / 2 ** (Math.max(0, Math.min(19, Number(query.zoom) || 0)) + 3),
+      total = this.db.prepare(`${points} SELECT COUNT(*) AS n FROM points ${where}`).get(...args).n,
+      clusters = this.db
+        .prepare(
+          `${points}
+        SELECT COUNT(*) AS count, AVG(latitude) AS latitude, AVG(longitude) AS longitude,
+          CASE WHEN COUNT(*)=1 THEN MIN(id) END AS id, MIN(name) AS name
+        FROM points ${where} GROUP BY CAST((longitude+180)/? AS INTEGER), CAST((latitude+90)/? AS INTEGER)
+        ORDER BY count DESC LIMIT 2000`,
+        )
+        .all(...args, cell, cell);
+    return { total, clusters, limit: 2000 };
+  }
   atlas(query = {}) {
+    if (query.mapMode === 'photos') return this.atlasPhotos(query);
     const filter = this.filters(query, 'rolls'),
       zoom = Math.max(0, Math.min(19, Number(query.zoom) || 0)),
       cell = 360 / 2 ** (zoom + 3),

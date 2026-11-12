@@ -395,13 +395,6 @@
   text-overflow: ellipsis;
   margin-top: 5px;
 }
-.timeline-page-note {
-  font-size: 9px;
-  color: var(--muted);
-  margin: 2px 0 0 calc(var(--timeline-rail) + 32px);
-  padding-top: 13px;
-  border-top: 1px solid var(--line);
-}
 .density-compact .timeline-roll {
   grid-template-columns: 105px minmax(0, 1fr);
   padding: 8px;
@@ -525,10 +518,6 @@
   }
   .timeline-year-rail > small {
     font-size: 8px;
-  }
-  .timeline-page-note {
-    font-size: 8px;
-    margin-left: 0;
   }
   .timeline-status {
     font-size: 7px;

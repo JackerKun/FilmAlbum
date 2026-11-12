@@ -1,183 +1,127 @@
-<p align="center"><img src="assets/icons/icon-256.png" width="104" height="104" alt="Film Album logo"></p>
+<p align="center">
+  <img src="assets/icons/icon-256.png" width="92" height="92" alt="Film Album">
+</p>
 <h1 align="center">Film Album</h1>
-<p align="center">A local-first film archive and photobook workspace.</p>
-<p align="center"><a href="README.md">简体中文</a> · English · <a href="#interface-tour">UI tour</a> · <a href="https://github.com/JackerKun/FilmAlbum/releases">Downloads</a> · <a href="BUILDING.md">Build and release guide</a></p>
+<p align="center">Organize film rolls and scans. Find the negative, the place and the photographs.</p>
+<p align="center">
+  <a href="README.md">简体中文</a> · English ·
+  <a href="https://github.com/JackerKun/FilmAlbum/releases">Downloads</a> ·
+  <a href="#interface-tour">Interface tour</a> ·
+  <a href="docs/USER_GUIDE.md">Usage guide in Chinese</a>
+</p>
 
-Film Album connects rolls, individual frames, multiple scans, physical negative locations, photographic projects, maps and print layouts. It runs as a macOS / Windows desktop application or a local web application.
+Film Album is a local workspace for film photography. Track shooting and development by roll, keep multiple scans of each frame, and turn your selections into photography projects, contact sheets or print-ready photobook layouts. It runs on macOS, Windows and in a local browser.
 
-![Archive overview with eight demo rolls, combined filters and the metadata inspector](docs/screenshots/archive.webp)
+![Archive card view with the selected roll's metadata and shooting location](docs/screenshots/archive.webp)
 
-_Actual application UI with built-in synthetic demo data. See the [interface tour](#interface-tour) for entry points and controls._
+_The screenshots show the actual interface with **72 rolls and 1,442 visible frame records**. The documentation library reuses 17 AI-generated photographs and includes 135 and 120 film, scan versions, map locations, a project and a photobook._
 
-**Preview software.** [3.0.1](https://github.com/JackerKun/FilmAlbum/releases/tag/v3.0.1) passed native builds, startup, thumbnails and original / PDF save checks on Apple Silicon Mac, Intel Mac, Windows x64 and Windows ARM64. These automated checks do not represent full manual acceptance of every feature. Distribution signing and Apple notarization are not configured by default.
+## Download and launch
 
-## Download
+| Device                        | GitHub Release installer                      |
+| ----------------------------- | --------------------------------------------- |
+| Apple Silicon Mac (macOS 13+) | `FilmAlbum-<version>-mac-arm64.dmg`           |
+| Intel Mac (macOS 13+)         | `FilmAlbum-<version>-mac-x64.dmg`             |
+| Windows Intel / AMD x64       | `FilmAlbum-<version>-windows-x64-setup.exe`   |
+| Windows ARM64                 | `FilmAlbum-<version>-windows-arm64-setup.exe` |
 
-Visit [Releases](https://github.com/JackerKun/FilmAlbum/releases) and select:
+On Mac, open the DMG and drag the app into Applications. On Windows, run the installer or extract the entire ZIP before opening `Film Album.exe`. Desktop packages include their runtime. Use `SHA256SUMS` to verify your download. [GitHub Releases](https://github.com/JackerKun/FilmAlbum/releases)
 
-| Device                       | Package                                       |
-| ---------------------------- | --------------------------------------------- |
-| Apple Silicon Mac, macOS 13+ | `FilmAlbum-<version>-mac-arm64.dmg`           |
-| Intel Mac, macOS 13+         | `FilmAlbum-<version>-mac-x64.dmg`             |
-| Windows, Intel / AMD x64     | `FilmAlbum-<version>-windows-x64-setup.exe`   |
-| Windows ARM64                | `FilmAlbum-<version>-windows-arm64-setup.exe` |
-
-ZIP archives are also available. Extract the complete Windows ZIP before starting `Film Album.exe`. End users do not need Node.js or Xcode. Release assets include `SHA256SUMS` for download verification.
-
-## Features
-
-- Roll cards, editable archive tables, film shelves and a chronological timeline.
-- Distinct 135 cassette / perforated film and 120 spool / backing-paper unrolling interactions.
-- Single, two-image and four-image review, thumbnail navigation, ratings, color labels, EXIF and an RGB histogram.
-- Combined filters for location, roll, dates, film format / type / stock, camera, lens, tags, rating, storage volume and online status.
-- Multiple scans per frame, primary versions, permanent roll codes and physical negative locations with QR labels.
-- Projects, chapters, candidate / final selections and a curation canvas.
-- A map with photo previews, explicit location confirmation, place lookup and configurable default country; China is the default view.
-- Photobooks with multiple size presets, detailed asset filters, millimeter geometry, corner resizing, drag cropping, alignment, bleed and print PDF export.
-- External-volume references, offline previews, integrity checks, recoverable trash and verified backups / restores.
-
-See the [Chinese usage guide](docs/USER_GUIDE.md) for detailed workflows. The interface supports Simplified Chinese and English for major navigation and common controls; some dynamic messages remain untranslated.
+The desktop app checks for the latest stable GitHub Release in the background on startup. If a newer version is available, the download button opens the release page so you can decide when to install it. The Help menu offers a manual update check and a link to GitHub Releases. The local library remains usable offline.
 
 ## Interface tour
 
-These are real **3.0.1** screenshots of the built-in demo library: **8 rolls and 98 visible synthetic images**, with multiple scans, coordinates, projects, a photobook and disconnected-storage examples. The landscapes are generated locally; no personal photographs are included. Screenshots use the Simplified Chinese UI; English is available in the top language selector. Click images for a larger view and expand the additional examples below.
+The screenshots use Simplified Chinese. The top language selector switches the main navigation and common controls to English.
 
-### From a roll to individual frames
+### Roll archive and film strips
+
+Record the film stock, format, camera, date and shooting location when you create a roll. Add lens, development and physical storage details as you archive it. Use the permanent roll code or printed QR label to find the negative.
+
+Browse all rolls as cards, a table, a film shelf, film strips or a timeline. The archive loads 50 rolls at a time as you scroll. Film strips open extended, so you can scroll through several rolls vertically. Back and Forward beside the search field restore the previous view, filters and scroll position.
+
+![Several film strips expanded in the roll archive](docs/screenshots/archive-film.webp)
 
 <details>
-<summary>135 and 120: distinct spools, perforations and unrolling interactions</summary>
+<summary>New roll form, timeline and 135 / 120 film handling</summary>
 
-**Open:** enter a roll from Archive, then choose **Film strip** in the light table. Drag the gold leader / take-up spool or use the slider. Drag horizontally to browse and double-click a frame to review it.
+![New roll form with date controls, location map and film stock filters](docs/screenshots/new-roll.webp)
 
-**135:** a cassette and film with two rows of perforations; pull out and rewind.
+![Photographic timeline grouped by year and month](docs/screenshots/timeline.webp)
 
-![135 film strip with a Portra 400 cassette, perforations, frame previews and an unroll slider](docs/screenshots/film-135.webp)
+Open a roll and choose Film Strip. The 135 view shows a cassette and two rows of perforations. The 120 view shows a spool, backing paper and wide film. Drag the leader or use the slider to unroll it, then double-click a frame to review it.
 
-**120:** supply spool, backing paper and take-up spool, with wide unperforated film. Frame proportions follow the selected 6×4.5 / 6×6 / 6×7 format.
+![135 cassette and perforated film strip](docs/screenshots/film-135.webp)
 
-![120 film strip with backing paper, unperforated frames and a take-up spool](docs/screenshots/film-120.webp)
+![120 spools, backing paper and wide film](docs/screenshots/film-120.webp)
 
 </details>
 
+### Scan versions and light table
+
+Preview roll grouping, frame numbers, order and duplicates before importing. Add rescans to the original frame and choose which scan is primary. Review one, two or four photographs with ratings, color labels and rejection flags. Use the thumbnails to move through the current results and press `I` for photo, roll and scan details, EXIF, histogram and location. Open a roll to export a contact sheet.
+
+![Photo review with thumbnails, RGB histogram and shooting location](docs/screenshots/lighttable.webp)
+
+### Memory map
+
+Browse locations by roll or photograph. Preview a roll from its map marker, search for a place, or set the roll location by placing a pin. The map button beside the shooting location in the photo information panel opens the map with that roll selected.
+
+![Memory Map with locations and a Shanghai roll preview](docs/screenshots/map.webp)
+
 <details>
-<summary>Timeline: browse photographic records by year and month</summary>
+<summary>Find a roll to place on the map</summary>
 
-**Open:** Archive → Timeline. Rolls follow their actual shooting dates. Use the year index and sort controls to browse the sequence while keeping equipment and physical archive details visible.
+Combine year, format, film stock, location status, place, equipment and tags to find the right roll.
 
-![Chronological roll timeline with a year index, monthly records and metadata](docs/screenshots/timeline.webp)
+![Roll placement picker with combined filters and paginated results](docs/screenshots/map-roll-picker.webp)
 
 </details>
 
-### Light table: review photographs with their context
+### Projects and photobooks
 
-**Open:** double-click a photograph in the light table. The bottom thumbnails follow the current query results. Use `F` to fit, `Z` for actual pixels, `I` for EXIF, `H` for the histogram and `1–5` to rate. Two-image / four-image comparisons and scan-version comparisons are also available.
+Organize candidate and final photographs by chapter. Arrange them on the curation canvas or export a portfolio. In the photobook editor, filter assets, drag to crop, set millimeter coordinates and check bleed and image resolution before exporting an RGB PDF with crop marks.
 
-![Photo review with current-result thumbnails, EXIF, RGB histogram, rating and color labels](docs/screenshots/lighttable.webp)
+![Photobook editor with assets, a selected photo frame and layout controls](docs/screenshots/photobook.webp)
 
 <details>
-<summary>Projects: organize candidates and final selections into chapters</summary>
+<summary>Project photo sequence and library overview</summary>
 
-**Open:** Projects / Curation → select a project. Add selected photographs from the light table, filter by chapter and selection stage, switch to the curation canvas or export a portfolio.
+![Photographic project with chapters, candidate and final photographs](docs/screenshots/projects.webp)
 
-![Demo photographic project with a photo sequence, chapters and selection-stage controls](docs/screenshots/projects.webp)
+![Library overview with archive totals, preview coverage and storage volumes](docs/screenshots/library.webp)
 
 </details>
 
-### Memory map: preview photographs before placing a roll
+## Libraries and offline use
 
-**Open:** Memory map. Click a roll marker to preview its frames, or search for a region, city, county or street. To place a roll, select it, click the map and explicitly confirm the position. China is the default region; change the default country in library settings.
+| Mode            | Default library location                                       |
+| --------------- | -------------------------------------------------------------- |
+| macOS desktop   | `~/Library/Application Support/Film Album/library`             |
+| Windows desktop | `%APPDATA%/Film Album/library`                                 |
+| Local browser   | `data/` in the project, configurable with `FILMALBUM_DATA_DIR` |
 
-![Map with China in view, roll positions, Shanghai photo previews and saved coordinates](docs/screenshots/map.webp)
+Use File → Open Library to switch to a folder containing `catalog.sqlite`. You can reference originals on an external drive or NAS and generate previews for offline viewing. Reconnect the originals for print and original-file exports. The Library workspace supports integrity checks, trash recovery, and backup creation and verification.
 
-<details>
-<summary>Roll lookup: combine location status, dates, places, equipment and film filters</summary>
-
-**Open:** Memory map → position the selected roll. Search names or permanent codes, then combine location status, year, format, film type / stock, date range, place, equipment, project and tag filters. Results include photo previews, coordinates and pagination. Valid coordinates count as located even without a place name.
-
-![Roll placement picker with combined filters, photo covers, location badges and coordinates](docs/screenshots/map-roll-picker.webp)
-
-</details>
-
-### Photobooks: find images, lay out precisely and export
-
-**Open:** Custom photobook → create a book or edit the demo book. Filter assets by place, roll and date on the left. Move image frames and resize their corners in the center; double-click to drag the crop. Set millimeter coordinates, rotation and alignment on the right. Save, run Preflight / PDF to check missing images and resolution, then export.
-
-![Photobook editor with detailed asset filters, page guides, a selected photo frame and alignment properties](docs/screenshots/photobook.webp)
-
-<details>
-<summary>Library: check originals, cache offline previews and manage external drives</summary>
-
-**Open:** Library → Overview. Check original availability, preview-cache coverage and disconnected media; run integrity checks or create and verify snapshots under Backup. Generate offline previews while originals are connected. Browsing the cache works after disconnecting a drive; original export and print-quality output still require the originals.
-
-![Library overview with roll and photo totals, preview coverage, original checks and storage volumes](docs/screenshots/library.webp)
-
-</details>
-
-### Try the same demo library
-
-Start the local server as described in [Run from source](#run-from-source), then open `http://127.0.0.1:8091/?debug=1`:
-
-1. Choose **Generate new demo library** in the experimental entry.
-2. Wait for the background task, then choose **Open demo library** in the task center.
-3. Explore the workspaces. Use the demo / return entry to return to your regular library afterward.
-
-Demo libraries use separate folders and do not overwrite your original library. The experimental entry is hidden during normal startup. Maintainers can refresh these images using the [capture script](scripts/screenshots.mjs); see [capture notes](docs/screenshots/README.md).
+Archiving, photo review and page layout run locally. Map tiles and place searches use the configured online map services. [Usage guide in Chinese](docs/USER_GUIDE.md)
 
 ## Run from source
 
-Use Git, Node.js 22.13+ (24 LTS recommended) and npm:
+Install Node.js 22.13+ and npm. On macOS or in a Bash environment, use the root launch script.
 
 ```bash
 git clone https://github.com/JackerKun/FilmAlbum.git
 cd FilmAlbum
-npm ci
-npm run desktop
+./start.sh
 ```
 
-For the local web interface, run `npm run serve` and open `http://127.0.0.1:8091`. On macOS, source mode needs Xcode Command Line Tools to compile its image helper on first use. Packaged applications include the compiled helper.
+You can also run `npm ci` followed by `npm run desktop` or start the local browser version with `npm run serve` and open `http://127.0.0.1:8091`. The native macOS image engine uses Xcode Command Line Tools in source mode.
 
-Desktop libraries default to `~/Library/Application Support/Film Album/library` on macOS and `%APPDATA%/Film Album/library` on Windows. Source mode defaults to `data/`. Select an existing library using **File → Open library**; back it up before upgrading.
+Open `http://127.0.0.1:8091/?debug=1` to generate the smaller built-in demo. The README uses a dedicated capture library. Run `node scripts/screenshots.mjs` to reproduce it. [Screenshot generation](docs/screenshots/README.md)
 
-Core archive, preview and layout operations work locally. Map tiles and place searches contact their configured providers; image analysis and PDF export run locally.
+## Development and releases
 
-## Build with GitHub Actions
+Run `npm run check` for UI and syntax checks and `npm test` for the test suite. See the build matrix, packaging and draft Release workflow in the [build guide](BUILDING.md). [Architecture notes](docs/ARCHITECTURE.md)
 
-1. Push the complete source, including `.github/`, `scripts/`, `assets/` and `package-lock.json`, to the default branch.
-2. Open [Actions → Desktop builds](https://github.com/JackerKun/FilmAlbum/actions/workflows/desktop-build.yml).
-3. Choose **Run workflow**, then select the platform and architecture. `all / all` builds all four combinations.
-4. Download `FilmAlbum-…` artifacts from the completed run. These outer artifact ZIPs contain the actual installers and app archives.
+This is preview software. Windows supports JPEG, PNG and TIFF scans. HEIC and camera RAW support depends on platform decoders. Default builds lack distribution signing and Apple notarization.
 
-For a release, push a tag matching `package.json`, for example `v3.0.1`. All four native builds and application smoke tests must pass before the workflow creates a **draft Release** with packages and SHA-256 checksums. Review it and choose **Publish release**. Manual runs only upload Actions artifacts; they do not publish a release.
-
-The release job uses `GITHUB_TOKEN` with `contents: write`; a personal access token is not required. Actions artifacts are retained for 30 days. Published Release assets are the intended download channel.
-
-## Local builds
-
-```bash
-./build.sh all               # On macOS: Mac DMG / ZIP and Windows ZIP, both architectures
-./build.sh mac --arch host
-./build.sh all --plan
-npm run check
-npm test
-```
-
-On Windows, use `./build.ps1 win --arch x64` or Git Bash to produce NSIS setup EXE and ZIP. macOS packages require a macOS build host. See [BUILDING.md](BUILDING.md).
-
-## Current limitations
-
-- Windows supports JPEG / PNG / TIFF previews, local Chinese / English OCR, QR decoding and PDF export; it currently has no HEIC / camera RAW decoding or object classifier. macOS uses ImageIO / Vision, with format support depending on the operating system.
-- Photobook PDFs are RGB files with bleed and crop marks, not CMYK / PDF-X certified files or imposed print signatures.
-- Packages are not signed with distribution certificates; macOS packages use ad-hoc signing without notarization.
-- Simulated metadata benchmarks do not represent a full-scale real TIFF import or long-term NAS stress test. Rosetta tests do not replace native Intel Mac tests.
-
-## Project and third-party licenses
-
-The project currently uses `UNLICENSED`; an open-source license has not been selected. Third-party components retain their own licenses. See [THIRD-PARTY.md](packaging/THIRD-PARTY.md), bundled asset licenses and the [logo design record](assets/LOGO.md).
-
-## Source layout and file workflows
-
-Application code is organized into `src/client/`, `src/server/` and `src/shared/`. Electron code lives in `desktop/`, Swift in `native/`, tests in `tests/` and build tooling in `scripts/`. Use `npm run format` / `npm run format:check` for Prettier. See [architecture notes](docs/ARCHITECTURE.md).
-
-Desktop PDF exports prompt for a native Save location after generation. The task center distinguishes generated PDFs from saved files, and supports saving again after cancellation. Original image extensions and Unicode filenames are preserved.
-
-Offline previews are 640 / 1600 pixel caches inside the current library. Generate them while originals are connected, then browse All photographs after disconnecting the external drive. Offline / missing is a status filter, not an import mode; an empty result when all originals are online is expected. The library overview shows cache coverage and failed items are listed in tasks. Original export and print-quality photobooks still require online originals.
+The project uses `UNLICENSED`. Third-party components retain their own licenses. [Third-party licenses](packaging/THIRD-PARTY.md)

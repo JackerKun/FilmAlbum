@@ -42,7 +42,7 @@ export function countryOptions(locale = 'zh-CN') {
   );
 }
 let loading;
-async function leaflet() {
+export async function leaflet() {
   if (window.L) return window.L;
   loading ||= new Promise((resolve, reject) => {
     const script = document.createElement('script');
@@ -53,6 +53,143 @@ async function leaflet() {
   });
   return loading;
 }
+export function mapTiles(L, url = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png') {
+  return L.tileLayer(url, {
+    maxZoom: 19,
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>',
+  });
+}
+export function mountLocationPreview(host, coordinates, preferences) {
+  let map,
+    resize,
+    disposed = false;
+  leaflet()
+    .then((L) => {
+      if (disposed || !host.isConnected) return;
+      const position = [coordinates.latitude, coordinates.longitude];
+      map = L.map(host, {
+        zoomControl: false,
+        scrollWheelZoom: false,
+        dragging: false,
+        doubleClickZoom: false,
+        keyboard: false,
+        touchZoom: false,
+      }).setView(position, 9);
+      mapTiles(L, preferences.mapTileURL || undefined).addTo(map);
+      map.attributionControl.setPrefix(false);
+      L.circleMarker(position, {
+        radius: 6,
+        color: '#fff',
+        weight: 2,
+        fillColor: '#3e6554',
+        fillOpacity: 1,
+      }).addTo(map);
+      resize = new ResizeObserver(() => map.invalidateSize({ pan: false }));
+      resize.observe(host);
+    })
+    .catch(() => {
+      if (!disposed) host.textContent = '地图暂不可用';
+    });
+  return () => {
+    disposed = true;
+    resize?.disconnect();
+    map?.remove();
+  };
+}
+export function mountLocationPicker(host, { api, preferences }) {
+  const mapHost = host.querySelector('.batch-location-map'),
+    status = host.querySelector('output'),
+    search = host.querySelector('[data-location-search]'),
+    find = host.querySelector('[data-location-find]'),
+    results = host.querySelector('[data-location-results]'),
+    name = host.querySelector('[data-location-name]'),
+    latitude = host.querySelector('[name="latitude"]'),
+    longitude = host.querySelector('[name="longitude"]');
+  const initial = rollCoordinates({ latitude: latitude.value, longitude: longitude.value });
+  let map,
+    marker,
+    disposed = false,
+    matches = [];
+  search.onkeydown = (event) => {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    find.click();
+  };
+  function setPoint(latlng) {
+    marker.setLatLng(latlng).addTo(map);
+    latitude.value = latlng.lat.toFixed(6);
+    longitude.value = latlng.lng.toFixed(6);
+    status.textContent = coordinateLabel({ latitude: latitude.value, longitude: longitude.value });
+  }
+  leaflet()
+    .then((L) => {
+      if (disposed || !mapHost.isConnected) return;
+      const view =
+        preferences.mapDefaultView ||
+        COUNTRY_VIEWS[preferences.mapDefaultCountry] ||
+        COUNTRY_VIEWS.CN;
+      map = L.map(mapHost, { scrollWheelZoom: false, maxZoom: 19 }).setView(view.center, view.zoom);
+      mapTiles(L, preferences.mapTileURL || undefined).addTo(map);
+      marker = L.circleMarker([0, 0], {
+        radius: 7,
+        weight: 2,
+        color: '#fff',
+        fillColor: '#3e6554',
+        fillOpacity: 1,
+      });
+      map.on('click', ({ latlng }) => setPoint(map.wrapLatLng(latlng)));
+      if (initial) {
+        const point = L.latLng(initial.latitude, initial.longitude);
+        map.setView(point, 9);
+        setPoint(point);
+      }
+      host.querySelector('[data-location-clear]')?.addEventListener('click', () => {
+        marker.remove();
+        name.value = latitude.value = longitude.value = search.value = '';
+        results.hidden = true;
+        status.textContent = '点击地图标记拍摄位置';
+      });
+      find.disabled = false;
+      find.onclick = async () => {
+        const q = search.value.trim();
+        if (!q) return search.focus();
+        find.disabled = true;
+        results.hidden = true;
+        try {
+          matches = await api('/places?' + new URLSearchParams({ q }));
+          if (disposed) return;
+          results.replaceChildren(
+            new Option(matches.length ? '选择搜索结果' : '未找到地点', ''),
+            ...matches.map((place, index) => new Option(place.label, String(index))),
+          );
+          results.hidden = false;
+        } catch {
+          if (!disposed) {
+            results.replaceChildren(new Option('暂时无法搜索地点', ''));
+            results.hidden = false;
+          }
+        } finally {
+          find.disabled = false;
+        }
+      };
+      results.onchange = () => {
+        if (results.value === '') return;
+        const place = matches[Number(results.value)],
+          point = L.latLng(place.latitude, place.longitude);
+        setPoint(point);
+        map.setView(point, 12);
+        name.value = place.label;
+      };
+    })
+    .catch(() => {
+      if (!disposed) status.textContent = '地图暂不可用';
+    });
+  return () => {
+    disposed = true;
+    map?.remove();
+  };
+}
 export function createAtlas({
   api,
   E,
@@ -60,6 +197,7 @@ export function createAtlas({
   toast,
   inspectRoll,
   openRoll,
+  openPhoto,
   savePosition,
   onFilterChange = () => {},
   onAdvancedFilters = () => {},
@@ -72,6 +210,7 @@ export function createAtlas({
     selectedRoll = null,
     draft = null,
     draftMarker = null,
+    photoMarker = null,
     sequence = 0,
     rollSequence = 0,
     pointSequence = 0,
@@ -109,7 +248,7 @@ export function createAtlas({
     ]);
     return { roll: { ...roll, frameCount: result.total }, photos: result.items };
   }
-  async function showRoll(id, assign = false) {
+  async function showRoll(id, assign = false, photoCoordinates = null, recenter = true) {
     const token = ++rollSequence,
       data = await details(id);
     if (disposed || token !== rollSequence) return;
@@ -119,6 +258,8 @@ export function createAtlas({
       preview(data.roll, data.photos) +
       `<div class="atlas-preview-actions"><button data-atlas="open-roll">查看整卷</button><button data-atlas="inspect-roll">查看档案</button><button data-atlas="place">${rollCoordinates(data.roll) ? '修改定位' : '为这卷定位'}</button><button data-atlas="dismiss">关闭</button></div><div id="atlas-position-draft"></div>`;
     selectedRoll = data.roll;
+    photoMarker?.remove();
+    photoMarker = null;
     panel.onclick = async (e) => {
       const a = e.target.closest('[data-atlas]')?.dataset.atlas;
       if (a === 'open-roll') openRoll(id);
@@ -126,6 +267,8 @@ export function createAtlas({
       if (a === 'place') activatePlacement();
       if (a === 'dismiss') {
         selectedRoll = null;
+        photoMarker?.remove();
+        photoMarker = null;
         draft = null;
         panel.hidden = true;
         draftMarker?.remove();
@@ -145,7 +288,18 @@ export function createAtlas({
     if (coordinates) {
       if (assign && map.getZoom() < 10)
         map.setView([coordinates.latitude, coordinates.longitude], 10);
-      else map.panTo([coordinates.latitude, coordinates.longitude]);
+      else if (recenter) map.panTo([coordinates.latitude, coordinates.longitude]);
+    } else if (photoCoordinates) {
+      const position = [photoCoordinates.latitude, photoCoordinates.longitude];
+      photoMarker = window.L.circleMarker(position, {
+        radius: 7,
+        color: '#fff',
+        weight: 2,
+        fillColor: '#3e6554',
+        fillOpacity: 0.95,
+      })
+        .bindTooltip('当前照片 · ' + coordinateLabel(photoCoordinates))
+        .addTo(map);
     }
     if (assign) activatePlacement();
   }
@@ -187,6 +341,8 @@ export function createAtlas({
     const patch = { ...draft, location: host.querySelector('#atlas-location-name').value };
     try {
       const saved = await savePosition(selectedRoll, patch);
+      photoMarker?.remove();
+      photoMarker = null;
       selectedRoll = { ...selectedRoll, ...saved };
       host.querySelector('[data-atlas-location]').textContent =
         positionText(selectedRoll) + ' · ' + selectedRoll.frameCount + ' 格';
@@ -223,6 +379,7 @@ export function createAtlas({
     );
     if (disposed || seq !== sequence) return;
     markers.clearLayers();
+    const photos = currentFilter.mapMode === 'photos';
     for (const c of result.clusters) {
       const marker = window.L.circleMarker([c.latitude, c.longitude], {
         radius: c.count > 1 ? Math.min(22, 10 + Math.log2(c.count) * 2) : 7,
@@ -231,18 +388,21 @@ export function createAtlas({
         fillColor: c.count > 1 ? '#806d3c' : '#3e6554',
         fillOpacity: 0.95,
       }).addTo(markers);
-      marker.bindTooltip(c.count > 1 ? `${c.count} 卷胶片` : E(c.name), { direction: 'top' });
+      marker.bindTooltip(c.count > 1 ? `${c.count} ${photos ? '张照片' : '卷胶片'}` : E(c.name), {
+        direction: 'top',
+      });
       marker.on('click', async () => {
         try {
-          if (c.count === 1) return await showRoll(c.id);
+          if (c.count === 1) return photos ? await openPhoto(c.id) : await showRoll(c.id);
           if (map.getZoom() < 17)
             return map.setView([c.latitude, c.longitude], Math.min(19, map.getZoom() + 2));
           const cell = 360 / 2 ** (map.getZoom() + 3),
             r = await api(
-              '/rolls?filter=' +
+              (photos ? '/atlas?filter=' : '/rolls?filter=') +
                 encodeURIComponent(
                   JSON.stringify({
                     ...currentFilter,
+                    ...(photos ? { points: true } : {}),
                     bounds: {
                       west: c.longitude - cell,
                       east: c.longitude + cell,
@@ -256,11 +416,11 @@ export function createAtlas({
             box = host.querySelector('#atlas-search-results');
           box.hidden = false;
           box.innerHTML =
-            '<p>此处胶卷（点击预览）</p>' +
+            (photos ? '<p>此处照片（点击预览）</p>' : '<p>此处胶卷（点击预览）</p>') +
             r.items
               .map(
                 (roll) =>
-                  `<button data-map-roll="${E(roll.id)}">${roll.coverMedia ? `<img src="${thumb(roll.coverMedia, 320)}" alt="">` : ''}<b>${E(roll.name)}</b><small>${E(roll.code)}</small></button>`,
+                  `<button data-map-roll="${E(roll.id)}">${roll.coverMedia || roll.mediaId ? `<img src="${thumb(roll.coverMedia || roll.mediaId, 320)}" alt="">` : ''}<b>${E(roll.name)}</b><small>${E(roll.code)}</small></button>`,
               )
               .join('');
           box.onclick = (e) => {
@@ -268,7 +428,9 @@ export function createAtlas({
             if (button) {
               box.hidden = true;
               box.innerHTML = '';
-              showRoll(button.dataset.mapRoll).catch((e) => toast(e.message));
+              (photos ? openPhoto(button.dataset.mapRoll) : showRoll(button.dataset.mapRoll)).catch(
+                (e) => toast(e.message),
+              );
             }
           };
         } catch (e) {
@@ -277,7 +439,7 @@ export function createAtlas({
       });
     }
     host.querySelector('#atlas-count').textContent =
-      `当前视野 ${result.total} 卷 · ${result.clusters.length} 个位置 · 缩放 ${map.getZoom()} / 19`;
+      `当前视野 ${result.total} ${photos ? '张' : '卷'} · ${result.clusters.length} 个位置 · 缩放 ${map.getZoom()} / 19`;
   }
   function reset() {
     const config =
@@ -348,7 +510,7 @@ export function createAtlas({
       host.querySelector('[data-atlas-filter="' + key + '"]').value = currentFilter[key] || '';
   }
   async function changeFilters(patch, resetAll = false) {
-    currentFilter = resetAll ? {} : { ...currentFilter, ...patch };
+    currentFilter = resetAll ? { mapMode: currentFilter.mapMode } : { ...currentFilter, ...patch };
     for (const key of Object.keys(currentFilter))
       if (!currentFilter[key]) delete currentFilter[key];
     if (resetAll || Object.hasOwn(patch, 'query')) rollQuery = currentFilter.query || '';
@@ -470,7 +632,16 @@ export function createAtlas({
   return {
     async mount(
       container,
-      { filter = {}, facets: availableFacets = {}, preferences = {}, focusId, assignId, view } = {},
+      {
+        filter = {},
+        facets: availableFacets = {},
+        preferences = {},
+        focusId,
+        focusCoordinates,
+        recenterFocus = true,
+        assignId,
+        view,
+      } = {},
     ) {
       const generation = ++mountId;
       disposed = false;
@@ -496,12 +667,7 @@ export function createAtlas({
         if (map && !disposed) map.invalidateSize({ pan: false });
       });
       resizeObserver.observe(host.querySelector('.atlas-stage'));
-      const tileURL = settings.mapTileURL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-      const tiles = L.tileLayer(tileURL, {
-        maxZoom: 19,
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>',
-      }).addTo(map);
+      const tiles = mapTiles(L, settings.mapTileURL || undefined).addTo(map);
       let failures = 0;
       tiles.on('tileerror', () => {
         if (++failures > 2)
@@ -582,7 +748,8 @@ export function createAtlas({
       host.querySelector('#atlas-home').onclick = reset;
       host.querySelector('#atlas-world').onclick = () => map.setView([25, 12], 2);
       await clusters();
-      if (focusId || assignId) await showRoll(focusId || assignId, Boolean(assignId));
+      if (!disposed && generation === mountId && (focusId || assignId))
+        await showRoll(focusId || assignId, Boolean(assignId), focusCoordinates, recenterFocus);
     },
     showRoll,
     async assign(id) {
@@ -601,6 +768,7 @@ export function createAtlas({
       clearTimeout(requestTimer);
       map?.remove();
       map = null;
+      photoMarker = null;
       draft = null;
       selectedRoll = null;
     },
@@ -608,6 +776,14 @@ export function createAtlas({
       return map
         ? { center: [map.getCenter().lat, map.getCenter().lng], zoom: map.getZoom() }
         : null;
+    },
+    getNavigationState() {
+      const point = photoMarker?.getLatLng();
+      return {
+        view: this.getView(),
+        focusId: selectedRoll?.id,
+        focusCoordinates: point && { latitude: point.lat, longitude: point.lng },
+      };
     },
   };
 }

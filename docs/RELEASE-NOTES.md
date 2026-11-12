@@ -1,33 +1,22 @@
-Film Album is a local-first film archive and photobook workspace.
-Film Album 是本地胶片档案与摄影画册工作台。
+## Film Album 3.1.0
 
-## Packages / 安装包
+- **浏览与归档**。顶部增加前进和后退，返回时恢复筛选、视图与滚动位置。全部胶卷新增默认展开的胶片条视图，档案视图按 50 卷分批加载。
+- **看片与地图**。切换照片时等待下一张载入，再柔和切换。信息栏集中显示照片、胶卷、扫描版本、EXIF 和直方图。带坐标的照片可跳转回忆地图并选中当前卷。
+- **录入与选片**。新建胶卷可在地图上设置地点。批量编辑按字段提供选择、文字录入、日期控件或地图。导入支持核对格号和重复文件，整卷和项目保留接触印样导出。
+- **更新与预览**。桌面版在后台检查 GitHub 正式版本，帮助菜单提供手动检查和发布页入口。源码可通过 `./start.sh` 启动，README 更新了 12 张来自独立演示库的截图。
 
-- macOS 13+: Apple Silicon `mac-arm64` / Intel `mac-x64`, DMG and ZIP.
-- Windows: Intel / AMD `x64` and ARM64, setup EXE and ZIP.
-- Extract the complete Windows ZIP before running `Film Album.exe`.
-- `SHA256SUMS` covers the downloadable installers and application archives.
+### What's new
 
-## Preview release / 预览版本
+- **Archive navigation**. Back and Forward restore the previous view, filters and scroll position. The archive adds expanded film strips and loads rolls in batches of 50.
+- **Review and map**. Photo review waits for the incoming image and fades it in. The information panel brings together photo, roll and scan details, EXIF and the histogram. A map link opens the current roll when coordinates are available.
+- **Entry and selection**. Set the shooting location on a map when creating a roll. Batch editing provides controls suited to each field. Check frame numbers and duplicate files during import, then export contact sheets for rolls or projects.
+- **Updates and preview**. The desktop app checks for stable releases in the background, and the Help menu offers a manual check and a link to releases. Use `./start.sh` to preview from source. The README includes 12 new screenshots from an isolated demo library.
 
-These packages are built on native runners and must pass application startup and thumbnail checks before this draft is prepared. This is not a full manual acceptance test of every feature.
-这些包已通过对应原生 runner 的测试、打包和应用启动 / 缩略图检查；不代表全部功能均已完成人工验收。
+### 安装包 / Packages
 
-Packages currently use no distribution certificates: macOS uses ad-hoc signing without notarization; Windows executables have no Authenticode signature. Operating systems may ask you to confirm the developer.
-当前未配置发行证书：Mac 使用临时签名且未公证，Windows EXE 未签名，系统可能提示无法验证开发者。
-
-Windows currently has no HEIC / camera RAW decoding or object classification. JPEG / PNG / TIFF previews, local Chinese / English OCR, QR decoding and PDF export are supported.
-Windows 暂不支持 HEIC / 相机 RAW 解码与物体分类。支持 JPEG / PNG / TIFF 预览、中英文离线 OCR、二维码与 PDF。
-
-Photobook PDFs use RGB, bleed and crop marks; they are not CMYK / PDF-X certified or imposed print signatures.
-画册 PDF 为 RGB，带出血和裁切标记，不是 CMYK / PDF-X 认证或印厂拼版文件。
-
-Existing libraries are not bundled. Back up your own library before upgrading. Use File → Open library to select its folder.
-安装包不含个人资料库。升级前请备份原库，通过“文件 → 打开资料库”选择现有目录。
-
-See the repository README and BUILDING.md for usage, storage locations and build instructions.
-
-## Map placement / 地图定位
-
-Located status now uses validated latitude / longitude, independent of the optional place name. The placement picker includes keyword, year, format, stock type / model, equipment, date range, place, tag and location-status filters, bounded pagination and photo previews.
-定位状态以有效经纬度为准，未填写地名也会显示已定位。选卷窗口支持关键词、年份、规格、类型 / 型号、设备、日期范围、地点、标签、定位状态、分页与照片预览。
+- macOS 13+，Apple Silicon 与 Intel，DMG 和 ZIP。
+- Windows x64 与 ARM64，安装 EXE 和 ZIP。使用 ZIP 时，请完整解压后运行 `Film Album.exe`。
+- 使用 `SHA256SUMS` 核对安装包。默认发行包使用 macOS 临时签名，Apple 公证和 Windows Authenticode 签名尚未配置。
+- macOS 13+ packages include DMG and ZIP for Apple Silicon and Intel.
+- Windows packages include setup EXE and ZIP for x64 and ARM64. Extract the full ZIP before launching `Film Album.exe`.
+- Verify packages with `SHA256SUMS`. macOS packages use ad-hoc signing. Apple notarization and Windows Authenticode signing are pending.

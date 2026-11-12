@@ -1,4 +1,4 @@
-// Capture the real UI using the application's synthetic demo library.
+// Capture the real UI in an isolated documentation library.
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,8 +12,9 @@ const output = resolve(process.env.FILMALBUM_SCREENSHOT_DIR || join(root, 'docs/
 const { default: sharp } = await import(
   pathToFileURL(createRequire(join(root, 'package.json')).resolve('sharp'))
 );
-const { seedDemo } = await import(pathToFileURL(join(root, 'src/server/demo.mjs')));
-const { Catalog } = await import(pathToFileURL(join(root, 'src/server/catalog.mjs')));
+const { createScreenshotLibrary } = await import(
+  pathToFileURL(join(root, 'scripts/screenshot-library.mjs'))
+);
 const version = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version;
 const browser =
   process.env.FILMALBUM_SCREENSHOT_BROWSER ||
@@ -55,12 +56,8 @@ function ready(child, stream, pattern) {
 }
 try {
   await mkdir(output, { recursive: true });
-  const demo = await seedDemo(base);
-  const catalog = new Catalog(demo.destination);
-  const rolls = catalog.query({ limit: 24 }, 'rolls').items;
-  const roll135 = rolls.find((r) => r.format === '135' && r.name === '京都散步');
-  const roll120 = rolls.find((r) => r.format.startsWith('120') && r.name === '东京雨夜');
-  catalog.close();
+  const demo = await createScreenshotLibrary(base, join(root, 'docs/screenshots'));
+  console.log('Screenshot library:', demo.rolls, 'rolls,', demo.photos, 'frames');
   server = spawn(process.execPath, ['src/server/server.mjs'], {
     cwd: root,
     env: {
@@ -144,16 +141,11 @@ try {
     evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
   async function navigate(workspace, roll) {
     await call('Page.navigate', {
-      url:
-        origin +
-        '/?debug=1&workspace=' +
-        workspace +
-        (roll ? '&roll=' + encodeURIComponent(roll) : ''),
+      url: origin + '/?workspace=' + workspace + (roll ? '&roll=' + encodeURIComponent(roll) : ''),
     });
     await wait(
-      "document.querySelector('#library-counts')?.textContent.includes('98') && document.querySelector('#editor')?.open",
+      `document.querySelector('#library-counts')?.textContent.includes(${JSON.stringify(demo.photos.toLocaleString('en-US'))})`,
     );
-    await evaluate("document.querySelector('#editor').close()");
     await wait("!document.querySelector('#view-content .empty')?.textContent.includes('正在')");
   }
   async function capture(name, required) {
@@ -190,26 +182,39 @@ try {
     await call('Emulation.clearDeviceMetricsOverride');
   }
   await navigate('archive');
-  await wait("document.querySelectorAll('.roll-card').length===8");
-  await click('.roll-card');
-  await capture('archive', "document.querySelector('#inspector input')");
+  await wait("document.querySelectorAll('.roll-card').length===50");
+  await click(`.roll-card[data-record="${demo.archiveRoll.id}"]`);
+  await capture('archive', "document.querySelector('#inspector .leaflet-tile-loaded')");
+  await click('[data-action="new-roll"]');
+  await capture(
+    'new-roll',
+    "document.querySelector('#editor[open] .stock-choice') && document.querySelector('#editor .leaflet-tile-loaded')",
+  );
+  await click('#editor-footer [data-action="close-editor"]');
+  await click('[data-action="view"][data-value="film"]');
+  await capture(
+    'archive-film',
+    "document.querySelectorAll('.archive-film-list .pull-studio').length >= 2 && document.querySelector('.archive-film-list .pull-frame img')?.naturalWidth > 0",
+  );
   await click('[data-action="view"][data-value="timeline"]');
   await capture(
     'timeline',
     "document.querySelector('.chronicle') || document.querySelector('.timeline') || document.querySelector('[data-action=timeline-jump]')",
   );
   for (const [name, roll] of [
-    ['film-135', roll135],
-    ['film-120', roll120],
+    ['film-135', demo.roll135],
+    ['film-120', demo.roll120],
   ]) {
     await navigate('lighttable', roll.id);
     await click('[data-action="view"][data-value="film"]');
-    await wait("document.querySelector('#pull-full')");
-    await click('#pull-full');
-    await click('[data-action="inspector"]');
+    await wait("document.querySelector('[data-pull=full]')");
+    await click('[data-pull=full]');
+    await evaluate(
+      "if (!document.body.classList.contains('inspector-hidden')) document.querySelector('[data-action=inspector]').click()",
+    );
     await capture(name, "document.querySelector('.pull-frame img')?.naturalWidth>0");
   }
-  await navigate('lighttable', roll135.id);
+  await navigate('lighttable', demo.roll135.id);
   await click('[data-action="view"][data-value="grid"]');
   await wait("document.querySelector('.photo-card')");
   await evaluate(
@@ -217,29 +222,43 @@ try {
   );
   await wait("document.querySelector('#reviewer')?.open");
   await click('[data-action="review-info"]');
-  await click('[data-action="review-hist"]');
-  await capture('lighttable', "document.querySelector('#review-grid img')?.naturalWidth>0");
+  await capture(
+    'lighttable',
+    "document.querySelector('#review-grid img:not([hidden])')?.naturalWidth > 0 && document.querySelector('#review-details .leaflet-tile-loaded')",
+  );
   await navigate('projects');
   await wait("document.querySelector('.project-card')");
-  await click('.project-card');
-  await capture('projects', "document.querySelectorAll('.photo-card').length===12");
-  await navigate('atlas');
-  await wait("document.querySelector('.leaflet-interactive')");
+  await click(`.project-card[data-value="${demo.projectId}"]`);
+  await capture('projects', "document.querySelectorAll('.photo-card').length===16");
+  await navigate('archive');
   await evaluate(
-    "document.querySelector('.leaflet-interactive').dispatchEvent(new MouseEvent('click',{bubbles:true}))",
+    `(() => {
+      const search = document.querySelector('#query-input');
+      search.value = ${JSON.stringify(demo.mapRoll.name)};
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`,
   );
-  await capture('map', "document.querySelector('#atlas-roll-preview')?.hidden===false");
+  const rollCard = `.roll-card[data-record="${demo.mapRoll.id}"]`;
+  await wait(`document.querySelector(${JSON.stringify(rollCard)})`);
+  await click(rollCard);
+  await click('#inspector [data-action="map-selected"]');
+  await wait("document.querySelector('#atlas-roll-preview')?.textContent.includes('上海暮色')");
+  await click('#atlas-home');
+  await capture(
+    'map',
+    "document.querySelector('#atlas-detailed-map .leaflet-tile-loaded') && document.querySelector('#atlas-roll-preview')?.hidden === false",
+  );
   await click('[data-action="map-place"]');
-  await wait("document.querySelectorAll('[data-map-roll-id]').length===8");
+  await wait("document.querySelectorAll('[data-map-roll-id]').length===24");
   await evaluate("document.querySelector('.map-picker-advanced').open=true");
   await capture(
     'map-roll-picker',
-    "document.querySelector('[data-picker-count]').textContent.includes('8')",
+    `document.querySelector('[data-picker-count]')?.textContent.includes('${demo.rolls}')`,
   );
   await navigate('archive');
   await click('[data-action="books"]');
   await wait("document.querySelector('[data-action=book-open]')");
-  await click('[data-action="book-open"]');
+  await click(`[data-action="book-open"][data-value="${demo.bookId}"]`);
   await wait(
     "document.querySelector('.book-designer')?.open && document.querySelector('.book-paper img')?.naturalWidth>0",
   );
@@ -256,8 +275,9 @@ try {
       {
         generatedAt: new Date().toISOString(),
         version,
-        source: 'seedDemo',
+        source: 'createScreenshotLibrary',
         synthetic: true,
+        library: { rolls: demo.rolls, frames: demo.photos, sourceImages: demo.sourceImages },
         shots,
       },
       null,

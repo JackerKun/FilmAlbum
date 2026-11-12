@@ -1,14 +1,37 @@
 {
-  "generatedAt": "2026-11-04T06:50:36.839Z",
-  "version": "3.0.1",
-  "source": "seedDemo",
+  "generatedAt": "2026-11-12T03:56:43.648Z",
+  "version": "3.1.0",
+  "source": "createScreenshotLibrary",
   "synthetic": true,
+  "library": {
+    "rolls": 72,
+    "frames": 1442,
+    "sourceImages": 17
+  },
   "shots": [
     {
       "name": "archive",
       "width": 1600,
       "height": 1050,
-      "bytes": 83416,
+      "bytes": 154468,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库"
+    },
+    {
+      "name": "new-roll",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 53918,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库"
+    },
+    {
+      "name": "archive-film",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 127174,
       "title": "胶片档案馆",
       "broken": [],
       "demo": "FILM ATLAS · 演示资料库"
@@ -17,7 +40,7 @@
       "name": "timeline",
       "width": 1600,
       "height": 1050,
-      "bytes": 63146,
+      "bytes": 91192,
       "title": "胶片档案馆",
       "broken": [],
       "demo": "FILM ATLAS · 演示资料库"
@@ -26,8 +49,8 @@
       "name": "film-135",
       "width": 1600,
       "height": 740,
-      "bytes": 57118,
-      "title": "全库照片",
+      "bytes": 81672,
+      "title": "京都散步",
       "broken": [],
       "demo": "FILM ATLAS · 演示资料库"
     },
@@ -35,8 +58,8 @@
       "name": "film-120",
       "width": 1600,
       "height": 740,
-      "bytes": 54298,
-      "title": "全库照片",
+      "bytes": 71536,
+      "title": "东京雨夜",
       "broken": [],
       "demo": "FILM ATLAS · 演示资料库"
     },
@@ -44,8 +67,8 @@
       "name": "lighttable",
       "width": 1600,
       "height": 1050,
-      "bytes": 36368,
-      "title": "全库照片",
+      "bytes": 301138,
+      "title": "京都散步",
       "broken": [],
       "demo": "FILM ATLAS · 演示资料库"
     },
@@ -53,8 +76,8 @@
       "name": "projects",
       "width": 1600,
       "height": 1050,
-      "bytes": 66242,
-      "title": "Across the world · 世界漫游",
+      "bytes": 143522,
+      "title": "01 · 城市与远方",
       "broken": [],
       "demo": "FILM ATLAS · 演示资料库"
     },
@@ -62,7 +85,7 @@
       "name": "map",
       "width": 1600,
       "height": 1050,
-      "bytes": 129400,
+      "bytes": 172438,
       "title": "回忆地图",
       "broken": [],
       "demo": "FILM ATLAS · 演示资料库"
@@ -71,7 +94,7 @@
       "name": "map-roll-picker",
       "width": 1600,
       "height": 1050,
-      "bytes": 44184,
+      "bytes": 53168,
       "title": "回忆地图",
       "broken": [],
       "demo": "FILM ATLAS · 演示资料库"
@@ -80,7 +103,7 @@
       "name": "photobook",
       "width": 1600,
       "height": 1050,
-      "bytes": 83408,
+      "bytes": 197906,
       "title": "胶片档案馆",
       "broken": [],
       "demo": "FILM ATLAS · 演示资料库"
@@ -89,7 +112,7 @@
       "name": "library",
       "width": 1600,
       "height": 1050,
-      "bytes": 59424,
+      "bytes": 52274,
       "title": "资料库与备份",
       "broken": [],
       "demo": "FILM ATLAS · 演示资料库"

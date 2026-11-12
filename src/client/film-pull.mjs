@@ -11,16 +11,18 @@ export function filmGeometry(format) {
 export function mountFilmPull(container, rows, roll, { escape: E, stock = {}, open, inspect }) {
   const geometry = filmGeometry(roll?.format),
     medium = geometry.medium,
-    key = 'film-pull:' + roll?.id;
-  let amount = Number(sessionStorage.getItem(key) ?? 35),
+    filmType = { color: '彩色负片', bw: '黑白负片', slide: '反转片', cinema: '电影胶片' }[
+      stock.group
+    ];
+  let amount = 100,
     drag = null,
     suppress = false;
-  container.innerHTML = `<section class="pull-studio ${medium ? 'pull120' : 'pull135'}" data-mechanism="${geometry.mechanism}" style="--frame-ratio:${geometry.ratio};--cassette:${stock.color || '#315747'};--label:${stock.color2 || '#e6c16f'}"><header><div><small>TACTILE FILM ARCHIVE</small><h2>${E(roll?.name || '胶片放映台')}</h2><p>拖动金色片头抽出胶片 · 单击查看档案 · 双击沉浸看片</p></div><button class="soft" id="pull-rewind">${medium ? '↶ 复位背纸' : '↶ 收卷'}</button></header><div class="pull-track"><div class="pull-cassette ${medium ? 'spool120' : ''}"><div class="cassette-cap"></div><div class="cassette-label"><small>${E(stock.brand || 'FILM')}</small><strong>${E(stock.name || 'ARCHIVE')}</strong><b>${E(stock.iso || '400')}</b><span>${medium ? '120 ROLL FILM' : '135 / COLOR NEGATIVE'}</span></div><div class="cassette-bottom"></div></div><div class="pull-window"><div class="pull-ribbon"><div class="pull-leader"><span>${medium ? '120 BACKING PAPER' : 'PULL TO DISCOVER'}</span><b>${medium ? '● → 卷向收片轴' : '← 拖动片头'}</b></div>${rows.map((p, i) => `<button class="pull-frame" data-film-id="${E(p.id)}"><span class="edge-code">${E(stock.brand || 'FILM')} ${E(stock.name || '')} • ${E(p.frameNo || String(i + 1))}${medium ? '' : 'A'}</span><img src="/api/v2/preview/${encodeURIComponent(p.mediaId)}?edge=640" alt="${E(p.name)}" draggable="false" loading="lazy"><span class="edge-number">${E(p.frameNo || String(i + 1))}${medium ? '' : 'A'} ▸ ${p.rating ? '★'.repeat(p.rating) : ''}</span></button>`).join('')}<span class="film-end">END / ${rows.length}</span></div></div><button class="pull-tab" id="film-pull-tab" aria-label="${medium ? '拖动收片轴卷动 120 背纸' : '拖动片头抽出 135 胶片'}">${medium ? '<i class="takeup-flange"></i><b>↻</b><span>TAKE-UP</span>' : '⠿<span>PULL</span>'}</button></div><footer><span>${E(roll?.code || '')} · ${E(roll?.format || '')} · 本页 ${rows.length} 格</span><label>${medium ? '卷片' : '抽拉'} <input id="film-pull-range" type="range" min="0" max="100" value="${amount}" aria-label="${medium ? '120 卷片展开比例' : '135 抽出比例'}"><output id="pull-amount"></output></label><button class="soft" id="pull-full">${medium ? '卷至收片轴 →' : '完全展开 →'}</button></footer><p class="pull-tip">${medium ? '120 是无齿孔宽胶片与背纸，从供片轴卷向收片轴；画幅比例随 6×4.5 / 6×6 / 6×7 等变化。复位仅为界面演示。' : '135 从暗盒抽出带双排齿孔的胶片；可收回暗盒。'} 展开后横向拖动浏览，双击底片看片。</p></section>`;
+  container.innerHTML = `<section class="pull-studio ${medium ? 'pull120' : 'pull135'}" data-mechanism="${geometry.mechanism}" style="--frame-ratio:${geometry.ratio};--cassette:${stock.color || '#315747'};--label:${stock.color2 || '#e6c16f'}"><header><div><small>TACTILE FILM ARCHIVE</small><h2>${E(roll?.name || '胶片放映台')}</h2><p>拖动金色片头抽出胶片 · 单击查看档案 · 双击沉浸看片</p></div><button class="soft" data-pull="rewind">${medium ? '↶ 复位背纸' : '↶ 收卷'}</button></header><div class="pull-track"><div class="pull-cassette ${medium ? 'spool120' : ''}"><div class="cassette-cap"></div><div class="cassette-label"><small>${E(stock.brand || 'FILM')}</small><strong>${E(stock.name || 'ARCHIVE')}</strong><b>${E(stock.iso || '400')}</b><span>${E([roll?.format || (medium ? '120' : '135'), filmType].filter(Boolean).join(' / '))}</span></div><div class="cassette-bottom"></div></div><div class="pull-window"><div class="pull-ribbon"><div class="pull-leader"><span>${medium ? '120 BACKING PAPER' : 'PULL TO DISCOVER'}</span><b>${medium ? '● → 卷向收片轴' : '← 拖动片头'}</b></div>${rows.map((p, i) => `<button class="pull-frame" data-film-id="${E(p.id)}"><span class="edge-code">${E(stock.brand || 'FILM')} ${E(stock.name || '')} • ${E(p.frameNo || String(i + 1))}</span><img src="/api/v2/preview/${encodeURIComponent(p.mediaId)}?edge=640" alt="${E(p.name)}" draggable="false" loading="lazy"><span class="edge-number">${E(p.frameNo || String(i + 1))} ▸ ${p.rating ? '★'.repeat(p.rating) : ''}</span></button>`).join('')}<span class="film-end">END / ${rows.length}</span></div></div><button class="pull-tab" data-pull="tab" aria-label="${medium ? '拖动收片轴卷动 120 背纸' : '拖动片头抽出 135 胶片'}">${medium ? '<i class="takeup-flange"></i><b>↻</b><span>TAKE-UP</span>' : '⠿<span>PULL</span>'}</button></div><footer><span>${E(roll?.code || '')} · ${E(roll?.format || '')} · 本页 ${rows.length} 格</span><label>${medium ? '卷片' : '抽拉'} <input data-pull="range" type="range" min="0" max="100" value="${amount}" aria-label="${medium ? '120 卷片展开比例' : '135 抽出比例'}"><output data-pull="amount"></output></label><button class="soft" data-pull="full">${medium ? '卷至收片轴 →' : '完全展开 →'}</button></footer><p class="pull-tip">${medium ? '120 是无齿孔宽胶片与背纸，从供片轴卷向收片轴；画幅比例随 6×4.5 / 6×6 / 6×7 等变化。复位仅为界面演示。' : '135 从暗盒抽出带双排齿孔的胶片；可收回暗盒。'} 展开后横向拖动浏览，双击底片看片。</p></section>`;
   const root = container.querySelector('.pull-studio'),
     window = root.querySelector('.pull-window'),
     ribbon = root.querySelector('.pull-ribbon'),
-    tab = root.querySelector('#film-pull-tab'),
-    range = root.querySelector('#film-pull-range');
+    tab = root.querySelector('[data-pull=tab]'),
+    range = root.querySelector('[data-pull=range]');
   function apply() {
     const room = Math.max(100, root.querySelector('.pull-track').clientWidth - 160),
       width = 88 + (amount / 100) * (room - 88);
@@ -28,18 +30,17 @@ export function mountFilmPull(container, rows, roll, { escape: E, stock = {}, op
     root.style.setProperty('--winding', amount * 9 + 'deg');
     root.style.setProperty('--takeup-size', (0.65 + amount / 220).toFixed(3));
     range.value = amount;
-    root.querySelector('#pull-amount').textContent = Math.round(amount) + '%';
-    sessionStorage.setItem(key, String(amount));
+    root.querySelector('[data-pull=amount]').textContent = Math.round(amount) + '%';
   }
   range.oninput = () => {
     amount = Number(range.value);
     apply();
   };
-  root.querySelector('#pull-full').onclick = () => {
+  root.querySelector('[data-pull=full]').onclick = () => {
     amount = 100;
     apply();
   };
-  root.querySelector('#pull-rewind').onclick = () => {
+  root.querySelector('[data-pull=rewind]').onclick = () => {
     amount = 0;
     window.scrollLeft = 0;
     apply();
@@ -115,8 +116,9 @@ export function mountFilmPull(container, rows, roll, { escape: E, stock = {}, op
   new MutationObserver((_, o) => {
     if (!root.isConnected) {
       observer.disconnect();
+      clearTimeout(timer);
       o.disconnect();
     }
-  }).observe(container, { childList: true });
+  }).observe(container.closest('#view-content') || container, { childList: true, subtree: true });
   apply();
 }

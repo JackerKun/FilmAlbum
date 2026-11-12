@@ -22,7 +22,7 @@ chmod +x build.sh
 | Windows 10+ | Intel / AMD x64       | 可解压运行的 ZIP |
 | Windows 11  | ARM64                 | 可解压运行的 ZIP |
 
-产物目录为 `dist/3.0.1/<mac或win>-<arm64或x64>/`，同时写入 `SHA256SUMS` 与 `build-manifest.json`。Windows ZIP 需完整解压，运行其中的 `Film Album.exe`；不要单独拷贝 EXE。
+产物目录为 `dist/<版本>/<mac或win>-<arm64或x64>/`，同时写入 `SHA256SUMS` 与 `build-manifest.json`。Windows ZIP 需完整解压，运行其中的 `Film Album.exe`；不要单独拷贝 EXE。
 
 构建 Windows 安装向导 `.exe` 时，在 Windows 本机或 Windows CI 上运行：
 
@@ -104,7 +104,7 @@ git push -u origin HEAD
 ## 发布一个版本
 
 1. 修改 package.json 的 version，并同步 package-lock.json（可运行 `npm install --package-lock-only`）。提交并推送源码。
-2. 为该提交打与版本一致的标签，例如 `git tag v3.0.1`，然后 `git push origin v3.0.1`。标签不匹配会在构建开始前被拒绝。
+2. 为该提交打与版本一致的标签，例如 `git tag v3.1.0`，然后 `git push origin v3.1.0`。标签不匹配会在构建开始前被拒绝。
 3. 等待四个平台构建、测试与真实应用启动检查全部通过。不同平台可能排队；额度和 runner 可用性以 GitHub 账户为准。
 4. 打开仓库 Releases 中的草稿，核对八个包（两种 Mac 的 DMG / ZIP，加两种 Windows 的 setup EXE / ZIP）、SHA256SUMS、四组构建与启动记录，完成说明后再 Publish release。
 5. 已发布版本不可通过此工作流覆盖；修复请增加版本并使用新标签。草稿阶段重跑会替换同名附件。

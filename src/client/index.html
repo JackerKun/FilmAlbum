@@ -19,8 +19,31 @@
         <button class="brand" data-action="home">
           <img class="brand-icon" src="/assets/icons/icon-256.png" alt="" /><span
             >FILM ALBUM<small>PERSONAL FILM ARCHIVE</small></span
-          ></button
-        ><button id="global-search" class="global-search" data-action="command">
+          >
+        </button>
+        <div class="navigation-history" role="group" aria-label="浏览历史">
+          <button
+            id="nav-back"
+            type="button"
+            data-action="nav-back"
+            aria-label="后退"
+            title="后退"
+            disabled
+          >
+            <span aria-hidden="true">‹</span>
+          </button>
+          <button
+            id="nav-forward"
+            type="button"
+            data-action="nav-forward"
+            aria-label="前进"
+            title="前进"
+            disabled
+          >
+            <span aria-hidden="true">›</span>
+          </button>
+        </div>
+        <button id="global-search" class="global-search" data-action="command">
           <span>⌕ 搜索照片、胶卷、位置与命令</span><kbd>⌘ K</kbd>
         </button>
         <div class="top-actions">
@@ -38,6 +61,11 @@
         ><button data-action="books">▧ 定制画册</button
         ><button data-workspace="storage"><span>▧</span>资料库</button>
       </nav>
+      <div id="update-banner" class="update-banner" hidden>
+        <span role="status"><span>发现新版本</span> <b id="update-version"></b></span>
+        <a id="update-download" target="_blank" rel="noopener noreferrer">去下载</a>
+        <button id="update-dismiss" type="button" aria-label="关闭">×</button>
+      </div>
       <div class="app-body">
         <aside id="sidebar" class="sidebar">
           <header>
@@ -109,8 +137,13 @@
           ><button data-action="review-sync" id="review-sync" aria-pressed="true">同步</button
           ><button data-action="review-lock" id="review-lock" aria-pressed="false">锁定参考</button
           ><button data-action="review-wipe" id="review-wipe" aria-pressed="false">版本擦拭</button
-          ><button data-action="review-info" id="review-info" aria-pressed="false">EXIF I</button
-          ><button data-action="review-hist" id="review-hist" aria-pressed="false">直方图 H</button
+          ><button
+            data-action="review-info"
+            id="review-info"
+            aria-expanded="false"
+            aria-controls="review-details"
+          >
+            信息 I</button
           ><button data-action="close-review" aria-label="关闭看片台">×</button>
         </nav>
       </header>

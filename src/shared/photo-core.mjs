@@ -123,3 +123,19 @@ export function histogramBins(pixels) {
   }
   return bins;
 }
+// Keep recorded edge numbers intact and expose gaps between adjacent numbered frames.
+export function contactSlots(photos) {
+  return photos.flatMap((photo, index) => {
+    const before = photos[index - 1]?.frameNo;
+    const after = photo.frameNo;
+    const numbered = /^\d{1,3}$/;
+    const gap = numbered.test(before) && numbered.test(after) ? Number(after) - Number(before) : 0;
+    const empty =
+      gap > 1 && gap <= 36
+        ? Array.from({ length: gap - 1 }, (_, i) => ({
+            frameNo: String(Number(before) + i + 1).padStart(String(after).length, '0'),
+          }))
+        : [];
+    return [...empty, photo];
+  });
+}

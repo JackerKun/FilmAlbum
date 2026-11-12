@@ -65,6 +65,10 @@ test('picker filters intersect stock, format, dates, equipment, location, photo 
   const m = c.addMedia({ path: 'media/test.bin', mime: 'image/jpeg' });
   const photo = c.addPhoto(roll.id, m);
   c.patch('photos', photo.id, { tags: ['街拍'] }, photo.version);
+  assert.deepEqual(c.query({ id: photo.id }, 'photos').items[0].rollCoordinates, {
+    latitude: 31.23,
+    longitude: 121.47,
+  });
   c.createRoll({ name: 'Another', stock: 'portra400', format: '135', date: '2025-01-01' });
   const filter = mapRollQuery({
     query: 'Shanghai',

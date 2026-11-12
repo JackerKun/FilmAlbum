@@ -327,17 +327,33 @@ async function pdf(manifest, destination) {
     cache = new Map(),
     items = source.items || [],
     labels = source.mode === 'labels',
-    perPage = labels ? 12 : 6,
+    contact = source.mode === 'contact',
+    perPage = labels ? 12 : contact ? 36 : 6,
     pages = Math.max(1, Math.ceil(items.length / perPage));
   for (let n = 0; n < pages; n++) {
     const page = ctx.doc.addPage([595, 842]);
-    text(page, ctx, source.title, { x: 30, y: 787, w: 535, h: 28, size: 20 });
+    text(page, ctx, source.title, { x: 30, y: 787, w: source.matrix ? 470 : 535, h: 28, size: 20 });
+    if (source.matrix) {
+      const step = 1.5;
+      source.matrix.forEach((row, y) =>
+        row.forEach((cell, x) => {
+          if (cell)
+            page.drawRectangle({
+              x: 512 + (x + 4) * step,
+              y: 835 - (y + 5) * step,
+              width: step,
+              height: step,
+              color: rgb(0, 0, 0),
+            });
+        }),
+      );
+    }
     text(page, ctx, `FILM ALBUM / ${n + 1} · ${pages}`, { x: 30, y: 20, w: 535, h: 17, size: 9 });
     for (const [position, item] of items.slice(n * perPage, (n + 1) * perPage).entries()) {
-      const columns = labels ? 3 : 2,
-        w = labels ? 172 : 260,
-        h = labels ? 170 : 230,
-        x = 30 + (position % columns) * (w + 15),
+      const columns = labels ? 3 : contact ? 6 : 2,
+        w = labels ? 172 : contact ? 82 : 260,
+        h = labels ? 170 : contact ? 107 : 230,
+        x = 30 + (position % columns) * (w + (contact ? 8 : 15)),
         y = 770 - (Math.floor(position / columns) + 1) * (h + 12);
       if (labels) {
         const matrix = item.matrix || [],
@@ -355,7 +371,7 @@ async function pdf(manifest, destination) {
         text(page, ctx, item.code, { x, y: y + 27, w, h: 18, size: 11 });
         text(page, ctx, item.name, { x, y: y + 10, w, h: 17, size: 10 });
       } else {
-        const rect = { x, y: y + 38, w, h: h - 42 };
+        const rect = { x, y: y + (contact ? 25 : 38), w, h: h - (contact ? 28 : 42) };
         page.drawRectangle({
           x: rect.x,
           y: rect.y,
@@ -365,7 +381,13 @@ async function pdf(manifest, destination) {
         });
         if (item.path)
           drawCropped(page, await embedImage(ctx, item.path, cache), rect, { fit: 'contain' });
-        text(page, ctx, item.name, { x, y: y + 17, w, h: 18, size: 10 });
+        text(page, ctx, item.name, {
+          x,
+          y: y + (contact ? 11 : 17),
+          w,
+          h: contact ? 13 : 18,
+          size: 10,
+        });
         text(page, ctx, item.caption, {
           x,
           y: y + 2,

@@ -5,6 +5,7 @@ const {
   dialog,
   shell,
   session,
+  net,
   utilityProcess,
   ipcMain,
 } = require('electron');
@@ -18,6 +19,7 @@ const {
   writeFileSync,
 } = require('node:fs');
 const { randomBytes } = require('node:crypto');
+const { checkForUpdate, releasesUrl } = require('./update-check.cjs');
 app.setName('Film Album');
 // Isolated smoke-test profiles and normal library sessions need separate locks.
 const userData = process.env.FILMALBUM_DESKTOP_DATA_DIR
@@ -34,6 +36,8 @@ if (!app.requestSingleInstanceLock()) {
     origin = '',
     token = '',
     readyPromise,
+    pendingUpdateCheck,
+    manualUpdateOpen = false,
     quittingRequested = false,
     quitAllowed = false,
     stopping = false;
@@ -140,6 +144,46 @@ if (!app.requestSingleInstanceLock()) {
       dialog.showErrorBox('无法打开文件夹', error.message);
     }
   }
+  function requestUpdateCheck() {
+    pendingUpdateCheck ??= checkForUpdate(app.getVersion(), (url, options) =>
+      net.fetch(url, options),
+    ).finally(() => {
+      pendingUpdateCheck = null;
+    });
+    return pendingUpdateCheck;
+  }
+  function openReleasePage(url = releasesUrl) {
+    return shell.openExternal(url).catch((error) => {
+      dialog.showErrorBox('无法打开 GitHub 发布页', error.message);
+    });
+  }
+  async function showUpdateCheck() {
+    if (manualUpdateOpen) return;
+    manualUpdateOpen = true;
+    try {
+      const update = await requestUpdateCheck();
+      const available = update.status === 'available';
+      const options = {
+        type: update.status === 'unavailable' ? 'warning' : 'info',
+        title: '检查更新',
+        message: {
+          available: `发现新版本 v${update.version}`,
+          current: '当前已是最新正式版本',
+          unavailable: '暂时无法检查更新',
+        }[update.status],
+        detail: `当前版本 v${app.getVersion()}`,
+        buttons: available ? ['去下载', '关闭'] : ['关闭'],
+        defaultId: available ? 1 : 0,
+        cancelId: available ? 1 : 0,
+      };
+      const { response } = await (window
+        ? dialog.showMessageBox(window, options)
+        : dialog.showMessageBox(options));
+      if (available && response === 0) await openReleasePage(update.url);
+    } finally {
+      manualUpdateOpen = false;
+    }
+  }
   function menu() {
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
@@ -200,6 +244,9 @@ if (!app.requestSingleInstanceLock()) {
         {
           label: '帮助 / Help',
           submenu: [
+            { label: '检查更新… / Check for Updates…', click: showUpdateCheck },
+            { label: '打开 GitHub 发布页 / GitHub Releases', click: () => openReleasePage() },
+            { type: 'separator' },
             {
               label: '关于 Film Album',
               click: () =>
@@ -502,6 +549,12 @@ if (!app.requestSingleInstanceLock()) {
   app
     .whenReady()
     .then(async () => {
+      const updateCheck = process.env.FILMALBUM_DESKTOP_SMOKE === '1' ? null : requestUpdateCheck();
+      ipcMain.handle('filmalbum:check-for-update', async (event) => {
+        if (!trustedSender(event)) return null;
+        const update = await updateCheck;
+        return update?.status === 'available' ? update : null;
+      });
       await installFileBridge();
       app.setAppUserModelId('com.filmalbum.studio');
       menu();
