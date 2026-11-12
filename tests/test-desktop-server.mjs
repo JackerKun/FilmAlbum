@@ -56,9 +56,14 @@ test(
       ).status,
       403,
     );
-    assert.equal(
-      (await fetch(url + '/assets/fonts/NotoSansSC-Regular.otf', { headers })).status,
-      403,
-    );
+    // The photobook editor now explicitly serves its two bundled fonts.
+    for (const font of ['NotoSansSC-Regular.otf', 'NotoSerifSC-Regular.otf']) {
+      assert.equal((await fetch(url + '/assets/fonts/' + font)).status, 403);
+      const response = await fetch(url + '/assets/fonts/' + font, { headers });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('content-type'), 'font/otf');
+      await response.arrayBuffer();
+    }
+    assert.equal((await fetch(url + '/assets/fonts/OFL.txt', { headers })).status, 403);
   },
 );

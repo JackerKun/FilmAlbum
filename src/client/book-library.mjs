@@ -1,5 +1,17 @@
 import { STOCKS } from '../shared/film-stocks.mjs';
-export function createBookLibrary({ api, E, thumb, t, onAdd, toast }) {
+export function createBookLibrary({
+  api,
+  E,
+  thumb,
+  t,
+  onAdd,
+  onBatch,
+  toast,
+  getUsage = () => ({}),
+  getSelected = () => [],
+  onUse,
+  onReplace,
+}) {
   let root,
     filters = { dateSource: 'photo', sort: 'date' },
     items = [],
@@ -15,11 +27,15 @@ export function createBookLibrary({ api, E, thumb, t, onAdd, toast }) {
     rollTotal = 0,
     rollOpen = false,
     advanced = false,
+    expanded = false,
+    onlyUnused = false,
+    selectionAnchor = null,
+    loadedUsage = '',
     request = 0,
     rollRequest = 0,
     timer,
     rollTimer;
-  const limit = 40,
+  const limit = 50,
     $ = (s) => root?.querySelector(s),
     option = (v, label, value) =>
       `<option value="${E(v)}" ${String(value || '') === String(v) ? 'selected' : ''}>${E(label)}</option>`;
@@ -39,7 +55,8 @@ export function createBookLibrary({ api, E, thumb, t, onAdd, toast }) {
     const filterScroll = root?.querySelector('.book-photo-filters')?.scrollTop || 0,
       resultScroll = root?.querySelector('.book-library-results')?.scrollTop || 0;
     root = node;
-    root.innerHTML = `<div class="book-library-heading"><h3>${t('照片素材', 'Photo library')}</h3><button data-library="reset">${t('重置', 'Reset')}</button></div><form class="book-photo-filters"><input id="book-search" data-book-filter="query" type="search" value="${E(filters.query || '')}" placeholder="${t('搜索名称、编号、文字与标签', 'Search names, codes, text & tags')}" aria-label="${t('搜索照片素材', 'Search photo library')}"><label>${t('地点 · 省 / 市 / 县 / 街道', 'Location · region / city / street')}<input data-book-filter="place" value="${E(filters.place || '')}" list="book-place-options" placeholder="${t('输入地点，可匹配部分名称', 'Type a full or partial place')}" type="search"></label><datalist id="book-place-options">${facetRows(
+    root.classList.toggle('filters-expanded', expanded);
+    root.innerHTML = `<div class="book-library-heading"><h3>${t('照片素材', 'Photo library')}</h3><button data-library="filters" title="展开筛选">筛选</button><button data-library="reset">${t('重置', 'Reset')}</button></div><form class="book-photo-filters"><input id="book-search" data-book-filter="query" type="search" value="${E(filters.query || '')}" placeholder="${t('搜索名称、编号、文字与标签', 'Search names, codes, text & tags')}" aria-label="${t('搜索照片素材', 'Search photo library')}"><label>${t('地点 · 省 / 市 / 县 / 街道', 'Location · region / city / street')}<input data-book-filter="place" value="${E(filters.place || '')}" list="book-place-options" placeholder="${t('输入地点，可匹配部分名称', 'Type a full or partial place')}" type="search"></label><datalist id="book-place-options">${facetRows(
       'location',
     )
       .map(([v]) => `<option value="${E(v)}">`)
@@ -119,10 +136,38 @@ export function createBookLibrary({ api, E, thumb, t, onAdd, toast }) {
         ['name', t('照片名称', 'Photo name')],
       ],
     )}<button class="book-filter-apply" type="submit">${t('应用组合筛选', 'Apply filters')}</button></form><div class="book-library-results" aria-live="polite"></div>`;
+    if (onBatch) {
+      const quick = document.createElement('div');
+      quick.className = 'book-quick-filters';
+      quick.append(
+        root.querySelector('#book-search'),
+        root.querySelector('.book-roll-filter'),
+        root.querySelector('[data-book-filter=camera]').closest('label'),
+      );
+      root.querySelector('.book-library-heading').after(quick);
+    }
     root.onclick = (e) => {
+      const use = e.target.closest('[data-used-page]');
+      if (use) {
+        onUse?.(Number(use.dataset.usedPage) - 1);
+        return;
+      }
+      const replace = e.target.closest('[data-replace-photo]');
+      if (replace) {
+        onReplace?.(replace.dataset.replacePhoto);
+        return;
+      }
       const photo = e.target.closest('[data-photo]');
       if (photo) {
-        onAdd(photo.dataset.photo);
+        const id = photo.dataset.photo;
+        const from = items.findIndex((p) => p.id === selectionAnchor),
+          to = items.findIndex((p) => p.id === id);
+        if (onBatch && e.shiftKey && from >= 0 && to >= 0)
+          onBatch(items.slice(Math.min(from, to), Math.max(from, to) + 1));
+        else {
+          selectionAnchor = id;
+          onAdd(id);
+        }
         return;
       }
       const roll = e.target.closest('[data-library-roll]');
@@ -140,6 +185,17 @@ export function createBookLibrary({ api, E, thumb, t, onAdd, toast }) {
         return;
       }
       const a = e.target.closest('[data-library]')?.dataset.library;
+      if (a === 'filters') {
+        expanded = !expanded;
+        root.classList.toggle('filters-expanded', expanded);
+        return;
+      }
+      if (a === 'unused') {
+        onlyUnused = !onlyUnused;
+        page = 0;
+        load();
+        return;
+      }
       if (a === 'reset') {
         clearTimeout(timer);
         clearTimeout(rollTimer);
@@ -219,6 +275,10 @@ export function createBookLibrary({ api, E, thumb, t, onAdd, toast }) {
     showResults();
     $('.book-photo-filters').scrollTop = filterScroll;
     $('.book-library-results').scrollTop = resultScroll;
+    if (onlyUnused && Object.keys(getUsage()).sort().join(',') !== loadedUsage) {
+      page = 0;
+      load();
+    }
   }
   function schedule() {
     const count = $('summary span');
@@ -262,20 +322,29 @@ export function createBookLibrary({ api, E, thumb, t, onAdd, toast }) {
     const box = $('.book-library-results');
     if (!box) return;
     const active = filterCount();
-    box.innerHTML = `<div class="book-library-count">${loading ? t('正在筛选…', 'Filtering…') : `${total.toLocaleString()} ${t('张匹配', 'matches')}${active ? ' · ' + active + ' ' + t('项条件', 'filters') : ''}`}<small>${t('点击或拖入画布', 'Click or drag onto page')}</small></div>${error ? `<p class="book-library-error">${E(error)} <button data-library="retry">${t('重试', 'Retry')}</button></p>` : ''}<div class="book-photo-list" ${loading ? 'aria-busy="true"' : ''}>${items.map((p) => `<button data-photo="${E(p.id)}" draggable="true" title="${E([p.name, p.rollName, p.location, p.date].filter(Boolean).join(' · '))}" ${loading ? 'disabled' : ''}><img src="${thumb(p.mediaId, 320)}" draggable="false" loading="lazy" alt="${E(p.name)}"><span>${E(p.rollName)} · ${E(p.frameNo || '')}</span><small>${E(p.location || '')} ${E(p.date || '')}</small></button>`).join('')}</div>${!loading && !error && !items.length ? `<p>${t('没有匹配照片，试试减少筛选条件。', 'No matches. Try removing a filter.')}</p>` : ''}<div class="book-photo-pagination"><button data-library="prev" aria-label="${t('素材上一页', 'Previous photos')}" ${!page || loading ? 'disabled' : ''}>‹</button><span>${total ? page + 1 : 0} / ${Math.ceil(total / limit)}<small>${t('每页 40 张', '40 per page')}</small></span><button data-library="next" aria-label="${t('素材下一页', 'Next photos')}" ${loading || (page + 1) * limit >= total ? 'disabled' : ''}>›</button></div>`;
+    const usage = getUsage(),
+      chosen = getSelected();
+    box.innerHTML = `<div class="book-library-count">${loading ? t('正在筛选…', 'Filtering…') : `${total.toLocaleString()} ${t('张匹配', 'matches')}`}<small>${t('点击添加 · 拖入指定照片框', 'Click to add · drop onto a frame')}</small>${onUse ? `<button data-library="unused" aria-pressed="${onlyUnused}">${onlyUnused ? '✓ 只看未使用' : '只看未使用'}</button>` : ''}</div>${error ? `<p class="book-library-error">${E(error)} <button data-library="retry">重试</button></p>` : ''}<div class="book-photo-list" ${loading ? 'aria-busy="true"' : ''}>${items.map((p) => `<article class="book-asset ${chosen.includes(p.id) ? 'picked' : ''}"><button data-photo="${E(p.id)}" draggable="true" title="${E([p.name, p.rollName, p.location, p.date].filter(Boolean).join(' · '))}" ${loading ? 'disabled' : ''}><img src="${thumb(p.mediaId, 320)}" draggable="false" loading="lazy" alt="${E(p.name)}"><span>${chosen.includes(p.id) ? '✓ ' : ''}${E(p.rollName)} · ${E(p.frameNo || '')}</span></button>${usage[p.id]?.length ? `<small>已用 ${usage[p.id].map((n) => `<button data-used-page="${n}">p.${n}</button>`).join(' ')}</small>` : ''}${onReplace ? `<button class="book-replace-link" data-replace-photo="${E(p.id)}">替换选中框</button>` : ''}</article>`).join('')}</div>${!loading && !error && !items.length ? '<p>没有匹配照片，试试减少筛选条件。</p>' : ''}<div class="book-photo-pagination"><button data-library="prev" aria-label="素材上一页" ${!page || loading ? 'disabled' : ''}>‹</button><span>${total ? page + 1 : 0} / ${Math.ceil(total / limit)}<small>每页 50 张</small></span><button data-library="next" aria-label="素材下一页" ${loading || (page + 1) * limit >= total ? 'disabled' : ''}>›</button></div>`;
   }
   async function load() {
     const generation = ++request;
+    ((selectionAnchor = null), (loadedUsage = Object.keys(getUsage()).sort().join(',')));
     loading = true;
     error = '';
     showResults();
     try {
       if (filters.from && filters.to && filters.from > filters.to)
         throw Error(t('起始日期不能晚于结束日期', 'Start date must not follow end date'));
-      const result = await api(
-        '/photos?filter=' +
-          encodeURIComponent(JSON.stringify({ ...filters, page, limit, type: 'image' })),
-      );
+      const result = await api('/photos/query', {
+        method: 'POST',
+        body: {
+          ...filters,
+          page,
+          limit,
+          type: 'image',
+          ...(onlyUnused ? { excludeIds: Object.keys(getUsage()) } : {}),
+        },
+      });
       if (generation !== request) return;
       items = result.items;
       total = result.total;
@@ -294,13 +363,38 @@ export function createBookLibrary({ api, E, thumb, t, onAdd, toast }) {
   }
   return {
     mount,
+    refresh: showResults,
+    setFilters(next) {
+      filters = { dateSource: 'roll', sort: 'frame', ...next };
+      page = 0;
+      if (root) mount(root);
+      return load();
+    },
+    async matching() {
+      const rows = [],
+        snapshot = { ...filters };
+      for (let index = 0; ; index++) {
+        const result = await api(
+          '/photos?filter=' +
+            encodeURIComponent(
+              JSON.stringify({ ...snapshot, page: index, limit: 50, type: 'image' }),
+            ),
+        );
+        if (result.total > 1200)
+          throw Error('一次最多选择 1200 张照片，请先按胶卷、项目或日期缩小范围');
+        rows.push(...result.items);
+        if (rows.length >= result.total || !result.items.length) return rows;
+      }
+    },
+    visible: () => items.slice(),
     getPhoto: (id) => items.find((p) => p.id === id),
-    async open() {
+    async open(initialFilters = {}) {
       clearTimeout(timer);
       clearTimeout(rollTimer);
       request++;
       rollRequest++;
-      filters = { dateSource: 'photo', sort: 'date' };
+      filters = { dateSource: 'roll', sort: 'frame', ...initialFilters };
+      onlyUnused = false;
       items = [];
       page = 0;
       total = 0;
@@ -316,6 +410,7 @@ export function createBookLibrary({ api, E, thumb, t, onAdd, toast }) {
       } catch (e) {
         toast(e.message, 'warning');
       }
+      if (root) mount(root);
       await load();
     },
     close() {

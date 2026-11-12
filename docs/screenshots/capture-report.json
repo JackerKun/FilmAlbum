@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-12T03:56:43.648Z",
+  "generatedAt": "2026-11-12T09:02:55.959705+00:00",
   "version": "3.1.0",
   "source": "createScreenshotLibrary",
   "synthetic": true,
@@ -13,46 +13,51 @@
       "name": "archive",
       "width": 1600,
       "height": 1050,
-      "bytes": 154468,
+      "bytes": 154426,
       "title": "胶片档案馆",
       "broken": [],
-      "demo": "FILM ATLAS · 演示资料库"
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/screenshots.mjs"
     },
     {
       "name": "new-roll",
       "width": 1600,
       "height": 1050,
-      "bytes": 53918,
+      "bytes": 53964,
       "title": "胶片档案馆",
       "broken": [],
-      "demo": "FILM ATLAS · 演示资料库"
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/screenshots.mjs"
     },
     {
       "name": "archive-film",
       "width": 1600,
       "height": 1050,
-      "bytes": 127174,
+      "bytes": 127110,
       "title": "胶片档案馆",
       "broken": [],
-      "demo": "FILM ATLAS · 演示资料库"
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/screenshots.mjs"
     },
     {
       "name": "timeline",
       "width": 1600,
       "height": 1050,
-      "bytes": 91192,
+      "bytes": 91226,
       "title": "胶片档案馆",
       "broken": [],
-      "demo": "FILM ATLAS · 演示资料库"
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/screenshots.mjs"
     },
     {
       "name": "film-135",
       "width": 1600,
       "height": 740,
-      "bytes": 81672,
+      "bytes": 81652,
       "title": "京都散步",
       "broken": [],
-      "demo": "FILM ATLAS · 演示资料库"
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/screenshots.mjs"
     },
     {
       "name": "film-120",
@@ -61,61 +66,227 @@
       "bytes": 71536,
       "title": "东京雨夜",
       "broken": [],
-      "demo": "FILM ATLAS · 演示资料库"
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/screenshots.mjs"
     },
     {
       "name": "lighttable",
       "width": 1600,
       "height": 1050,
-      "bytes": 301138,
+      "bytes": 301178,
       "title": "京都散步",
       "broken": [],
-      "demo": "FILM ATLAS · 演示资料库"
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/screenshots.mjs"
     },
     {
       "name": "projects",
       "width": 1600,
       "height": 1050,
-      "bytes": 143522,
+      "bytes": 143510,
       "title": "01 · 城市与远方",
       "broken": [],
-      "demo": "FILM ATLAS · 演示资料库"
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/screenshots.mjs"
     },
     {
       "name": "map",
       "width": 1600,
       "height": 1050,
-      "bytes": 172438,
+      "bytes": 172380,
       "title": "回忆地图",
       "broken": [],
-      "demo": "FILM ATLAS · 演示资料库"
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/screenshots.mjs"
     },
     {
       "name": "map-roll-picker",
       "width": 1600,
       "height": 1050,
-      "bytes": 53168,
+      "bytes": 53176,
       "title": "回忆地图",
       "broken": [],
-      "demo": "FILM ATLAS · 演示资料库"
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/screenshots.mjs"
     },
     {
       "name": "photobook",
       "width": 1600,
       "height": 1050,
-      "bytes": 197906,
+      "bytes": 105318,
       "title": "胶片档案馆",
       "broken": [],
-      "demo": "FILM ATLAS · 演示资料库"
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
     },
     {
       "name": "library",
       "width": 1600,
       "height": 1050,
-      "bytes": 52274,
+      "bytes": 52256,
       "title": "资料库与备份",
       "broken": [],
-      "demo": "FILM ATLAS · 演示资料库"
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/screenshots.mjs"
+    },
+    {
+      "name": "book-selection",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 96488,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-sizes",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 27540,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-builder",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 43608,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-overview",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 105144,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-styles",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 45630,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-stickers",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 37240,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-graphics",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 142300,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-stable-tools",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 142356,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-snapping",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 143182,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-context-menu",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 136510,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-grid-guides",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 152068,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-map-insert",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 36794,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-reading",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 139830,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-export-progress",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 37430,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
+    },
+    {
+      "name": "book-shelf",
+      "width": 1600,
+      "height": 1050,
+      "bytes": 54634,
+      "title": "胶片档案馆",
+      "broken": [],
+      "demo": "FILM ATLAS · 演示资料库",
+      "workflow": "scripts/qa-photobook.mjs"
     }
-  ]
+  ],
+  "bookFixture": {
+    "selectedPhotos": 40,
+    "pages": 34
+  },
+  "mapSources": {
+    "map": "OpenStreetMap live tiles",
+    "book-map-insert": "Bundled Natural Earth offline geography",
+    "excluded": "Test street tiles (book-map-crop) are not published"
+  }
 }

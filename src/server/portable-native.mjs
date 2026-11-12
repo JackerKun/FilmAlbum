@@ -1,14 +1,19 @@
+import { embedPDFFont } from './pdf-fonts.mjs';
+import { maskPoints, stickerSvg } from '../shared/book-graphics.mjs';
 import sharp from 'sharp';
+import { mapSvg } from '../shared/book-map.mjs';
 import exifr from 'exifr';
 import jsQR from 'jsqr';
 import {
   PDFDocument,
-  PDFName,
   rgb,
   pushGraphicsState,
   popGraphicsState,
   concatTransformationMatrix,
   rectangle,
+  moveTo,
+  lineTo,
+  closePath,
   clip,
   endPath,
 } from 'pdf-lib';
@@ -140,29 +145,23 @@ async function analyze(root, path) {
   }
 }
 async function savePDF(ctx) {
-  await ctx.doc.flush();
-  // A full OpenType CFF font must declare OpenType, not the raw CFF subset subtype.
-  // pdf-lib 1.17 otherwise labels the complete OTF stream as CIDFontType0C.
-  for (const [, object] of ctx.doc.context.enumerateIndirectObjects())
-    if (object.dict?.get(PDFName.of('Subtype'))?.toString() === '/CIDFontType0C')
-      object.dict.set(PDFName.of('Subtype'), PDFName.of('OpenType'));
   return ctx.doc.save();
 }
-async function createPDF() {
+async function createPDF(withSerif = false) {
   const doc = await PDFDocument.create();
-  doc.registerFontkit({
-    create: (bytes, ...args) => {
-      const font = fontkit.create(bytes, ...args);
-      if (Buffer.from(bytes).subarray(0, 4).toString() === 'OTTO') font.cff = true;
-      return font;
-    },
-  });
-  const bytes = await readFile(join(assets, 'fonts', 'NotoSansSC-Regular.otf'));
-  const font = await doc.embedFont(bytes, { subset: false }),
+  doc.registerFontkit(fontkit);
+  const font = await embedPDFFont(
+      doc,
+      await readFile(join(assets, 'fonts', 'NotoSansSC-Regular.otf')),
+    ),
     characters = new Set(font.getCharacterSet());
+  const serif = withSerif
+    ? await embedPDFFont(doc, await readFile(join(assets, 'fonts', 'NotoSerifSC-Regular.otf')))
+    : undefined;
   return {
     doc,
     font,
+    serif,
     clean: (text) =>
       [...String(text || '')]
         .map((ch) => (characters.has(ch.codePointAt(0)) ? ch : ch === '\n' ? '\n' : '?'))
@@ -187,24 +186,36 @@ function text(
   page,
   ctx,
   value,
-  { x, y, w, h, size = 12, align = 'left', fill = rgb(0.13, 0.15, 0.12) },
+  {
+    x,
+    y,
+    w,
+    h,
+    size = 12,
+    align = 'left',
+    fill = rgb(0.13, 0.15, 0.12),
+    fontFamily = 'sans',
+    lineHeight = 1.25,
+  },
 ) {
-  const lines = linesFor(ctx.clean(value), ctx.font, size, w),
-    leading = size * 1.25;
+  const font = fontFamily === 'serif' && ctx.serif ? ctx.serif : ctx.font;
+  const lines = linesFor(ctx.clean(value), font, size, w),
+    leading = size * lineHeight;
   for (const [i, line] of lines.entries()) {
     const baseline = y + h - size - i * leading;
     if (baseline < y - size * 0.1) break;
-    const lineWidth = ctx.font.widthOfTextAtSize(line, size),
+    const lineWidth = font.widthOfTextAtSize(line, size),
       offset = align === 'center' ? (w - lineWidth) / 2 : align === 'right' ? w - lineWidth : 0;
-    page.drawText(line, { x: x + offset, y: baseline, size, font: ctx.font, color: fill });
+    page.drawText(line, { x: x + offset, y: baseline, size, font, color: fill });
   }
 }
-async function embedImage(ctx, path, cache) {
+async function embedImage(ctx, path, cache, reading = false) {
   if (cache.has(path)) return cache.get(path);
   const bytes = await sharp(path)
       .rotate()
       .flatten({ background: '#fff' })
-      .jpeg({ quality: 95, chromaSubsampling: '4:4:4' })
+      .resize(reading ? { width: 1800, height: 1800, fit: 'inside', withoutEnlargement: true } : {})
+      .jpeg({ quality: reading ? 82 : 95, chromaSubsampling: reading ? '4:2:0' : '4:4:4' })
       .toBuffer(),
     image = await ctx.doc.embedJpg(bytes);
   cache.set(path, image);
@@ -226,15 +237,26 @@ function drawCropped(page, image, rect, el = {}) {
 }
 async function bookPDF(manifest, destination) {
   const book = JSON.parse(await readFile(manifest, 'utf8')),
-    ctx = await createPDF(),
+    ctx = await createPDF(book.pages.some((p) => p.elements.some((e) => e.fontFamily === 'serif'))),
     cache = new Map(),
-    margin = book.bleed + 6,
+    reading = book.exportMode === 'reading',
+    bleedSize = reading ? 0 : book.bleed,
+    margin = reading ? 0 : book.bleed + 6,
     width = book.width,
     height = book.height;
+  ctx.doc.setTitle(book.name || 'Photobook');
+  const land = book.pages.some((p) => p.elements.some((e) => e.type === 'map'))
+    ? JSON.parse(await readFile(new URL('../../public/world-land.json', import.meta.url), 'utf8'))
+    : null;
   for (const source of book.pages) {
     const page = ctx.doc.addPage([(width + 2 * margin) * MM, (height + 2 * margin) * MM]);
     page.setTrimBox(margin * MM, margin * MM, width * MM, height * MM);
-    page.setBleedBox(6 * MM, 6 * MM, (width + book.bleed * 2) * MM, (height + book.bleed * 2) * MM);
+    page.setBleedBox(
+      (reading ? 0 : 6) * MM,
+      (reading ? 0 : 6) * MM,
+      (width + bleedSize * 2) * MM,
+      (height + bleedSize * 2) * MM,
+    );
     page.drawRectangle({
       x: 0,
       y: 0,
@@ -243,10 +265,10 @@ async function bookPDF(manifest, destination) {
       color: rgb(1, 1, 1),
     });
     const bleed = {
-      x: 6 * MM,
-      y: 6 * MM,
-      w: (width + book.bleed * 2) * MM,
-      h: (height + book.bleed * 2) * MM,
+      x: (reading ? 0 : 6) * MM,
+      y: (reading ? 0 : 6) * MM,
+      w: (width + bleedSize * 2) * MM,
+      h: (height + bleedSize * 2) * MM,
     };
     page.drawRectangle({
       x: bleed.x,
@@ -280,35 +302,90 @@ async function bookPDF(manifest, destination) {
         clip(),
         endPath(),
       );
-      if (el.type === 'image' && el.path)
-        drawCropped(page, await embedImage(ctx, el.path, cache), rect, el);
-      else if (el.type === 'text')
+      if (el.type === 'image' && el.mask && el.mask !== 'rect') {
+        const points = maskPoints(el.mask).map(([x, y]) => [
+          rect.x + x * rect.w,
+          rect.y + (1 - y) * rect.h,
+        ]);
+        page.pushOperators(
+          moveTo(...points[0]),
+          ...points.slice(1).map((p) => lineTo(...p)),
+          closePath(),
+          clip(),
+          endPath(),
+        );
+      }
+      if (el.type === 'sticker') {
+        const key = el.dataUrl || stickerSvg(el.sticker, el.color);
+        if (!cache.has(key))
+          cache.set(
+            key,
+            await ctx.doc.embedPng(
+              await sharp(
+                el.dataUrl ? Buffer.from(el.dataUrl.split(',')[1], 'base64') : Buffer.from(key),
+                { limitInputPixels: 40000000 },
+              )
+                .resize({ width: 1600, height: 1600, fit: 'inside' })
+                .png()
+                .toBuffer(),
+            ),
+          );
+        page.drawImage(cache.get(key), {
+          x: rect.x,
+          y: rect.y,
+          width: rect.w,
+          height: rect.h,
+          opacity: el.opacity ?? 1,
+        });
+      } else if (el.type === 'image' && el.path)
+        drawCropped(page, await embedImage(ctx, el.path, cache, reading), rect, el);
+      else if (el.type === 'map') {
+        const key = el.snapshot || JSON.stringify([el.points, el.connect]);
+        if (!cache.has(key))
+          cache.set(
+            key,
+            await ctx.doc.embedPng(
+              await sharp(
+                el.snapshot
+                  ? Buffer.from(el.snapshot.split(',')[1], 'base64')
+                  : Buffer.from(mapSvg(el.points || [], land, el.connect)),
+              )
+                .resize(1600)
+                .png()
+                .toBuffer(),
+            ),
+          );
+        drawCropped(page, cache.get(key), rect, { fit: 'contain' });
+      } else if (el.type === 'text')
         text(page, ctx, el.text, {
           ...rect,
           size: el.fontSize || 14,
           align: el.align,
+          fontFamily: el.fontFamily,
+          lineHeight: el.lineHeight || 1.35,
           fill: color(el.color || '#222222'),
         });
       page.pushOperators(popGraphicsState());
     }
     page.pushOperators(popGraphicsState());
-    for (const x of [margin, margin + width])
-      for (const y of [margin, margin + height]) {
-        const sx = x === margin ? -1 : 1,
-          sy = y === margin ? -1 : 1;
-        page.drawLine({
-          start: { x: (x + sx * (book.bleed + 1)) * MM, y: y * MM },
-          end: { x: (x + sx * (book.bleed + 4)) * MM, y: y * MM },
-          thickness: 0.25,
-          color: rgb(0, 0, 0),
-        });
-        page.drawLine({
-          start: { x: x * MM, y: (y + sy * (book.bleed + 1)) * MM },
-          end: { x: x * MM, y: (y + sy * (book.bleed + 4)) * MM },
-          thickness: 0.25,
-          color: rgb(0, 0, 0),
-        });
-      }
+    if (!reading)
+      for (const x of [margin, margin + width])
+        for (const y of [margin, margin + height]) {
+          const sx = x === margin ? -1 : 1,
+            sy = y === margin ? -1 : 1;
+          page.drawLine({
+            start: { x: (x + sx * (book.bleed + 1)) * MM, y: y * MM },
+            end: { x: (x + sx * (book.bleed + 4)) * MM, y: y * MM },
+            thickness: 0.25,
+            color: rgb(0, 0, 0),
+          });
+          page.drawLine({
+            start: { x: x * MM, y: (y + sy * (book.bleed + 1)) * MM },
+            end: { x: x * MM, y: (y + sy * (book.bleed + 4)) * MM },
+            thickness: 0.25,
+            color: rgb(0, 0, 0),
+          });
+        }
   }
   const bytes = await savePDF(ctx);
   await writeFile(destination, bytes);

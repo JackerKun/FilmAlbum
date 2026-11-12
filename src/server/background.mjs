@@ -1,6 +1,7 @@
+import { createCoverDocument } from '../shared/book-model.mjs';
 import { safeFileName } from '../shared/file-names.mjs';
 import { seedDemo } from './demo.mjs';
-import { bookStore, bookPreflight } from './books.mjs';
+import { bookStore, bookPreflight, bookPhoto } from './books.mjs';
 import { parentPort, workerData } from 'node:worker_threads';
 import { DatabaseSync, backup } from 'node:sqlite';
 import {
@@ -644,18 +645,25 @@ async function exportPdf(job, catalog) {
   };
 }
 async function exportBook(job, catalog) {
-  const book = bookStore(catalog).get(job.payload.bookId),
-    check = bookPreflight(book, (id) => catalog.query({ id, limit: 1 }).items[0]);
+  const source = bookStore(catalog).get(job.payload.bookId),
+    book = job.payload.mode === 'cover' ? createCoverDocument(source) : source,
+    check = bookPreflight(book, (id, mediaId) => bookPhoto(catalog, id, mediaId));
+  book.exportMode = job.payload.mode === 'reading' ? 'reading' : 'print';
   if (check.warnings.some((w) => ['missing', 'offline'].includes(w.issue)))
     throw new Error('存在未装入、离线或内容变化的原片，请修复后导出');
   const pages = structuredClone(book.pages),
     verified = new Set();
   let done = 0;
+  const total = pages.reduce(
+    (sum, page) => sum + page.elements.filter((el) => el.type === 'image').length,
+    0,
+  );
+  tick(job, 0, total + 1, '检查照片与字体');
   for (const page of pages)
     for (const el of page.elements) {
       control(job);
       if (el.type === 'image') {
-        const photo = catalog.query({ id: el.photoId, limit: 1 }).items[0];
+        const photo = bookPhoto(catalog, el.photoId, el.mediaId);
         const media = catalog.mediaPath(photo.mediaId);
         await stat(media.absolute);
         if (!verified.has(photo.mediaId)) {
@@ -663,11 +671,12 @@ async function exportBook(job, catalog) {
             throw new Error('原片哈希发生变化，已停止打印导出');
           verified.add(photo.mediaId);
         }
-        el.path = await ensurePreview(catalog, { id: photo.mediaId }, 0);
-        if (el.path !== join(catalog.root, 'previews', photo.mediaId + '-0.jpg'))
+        const size = book.exportMode === 'reading' ? 1600 : 0;
+        el.path = await ensurePreview(catalog, { id: photo.mediaId }, size);
+        if (el.path !== join(catalog.root, 'previews', photo.mediaId + '-' + size + '.jpg'))
           throw new Error('打印需要全尺寸原片，不能使用离线缩略图');
         await stat(media.absolute);
-        tick(job, ++done, 0, '准备全尺寸画册影像');
+        tick(job, ++done, total + 1, `准备画册影像 ${done}/${total}`);
       }
     }
   const dir = join(home, 'exports');
@@ -675,9 +684,17 @@ async function exportBook(job, catalog) {
   const file = job.id + '.pdf',
     manifest = join(dir, job.id + '.json');
   await writeFile(manifest, json({ ...book, pages }));
+  tick(job, done, total + 1, '正在排版并嵌入中文字体…');
   return {
     file,
-    filename: safeFileName(book.name + '-打印稿.pdf'),
+    filename: safeFileName(
+      book.name +
+        (job.payload.mode === 'cover'
+          ? '-封面展开.pdf'
+          : book.exportMode === 'reading'
+            ? '-阅读版.pdf'
+            : '-打印稿.pdf'),
+    ),
     ...(await native(home, 'bookpdf', manifest, join(dir, file))),
     preflight: check,
   };

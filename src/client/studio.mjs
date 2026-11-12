@@ -1134,7 +1134,21 @@ const atlas = createAtlas({
     return r;
   },
 });
-const bookDesigner = createBookDesigner({ api, job, toast, E, thumb });
+const bookDesigner = createBookDesigner({
+  api,
+  job,
+  toast,
+  E,
+  thumb,
+  getContext: () => ({
+    filters: STATE.query.rollId
+      ? { rollId: STATE.query.rollId }
+      : STATE.projectId
+        ? { projectId: STATE.projectId, stage: 'final' }
+        : {},
+    groupBy: STATE.projectId ? 'project' : 'roll',
+  }),
+});
 const localeControl = installLocale();
 const reviewer = createReviewer({
   api,
@@ -1865,9 +1879,25 @@ function bars(rows, label) {
   const max = Math.max(1, ...rows.map((r) => r.count));
   return `<div class="bars">${rows.map((r) => `<div class="bar-row"><span>${E(label(r) || '未记录')}</span><i style="width:${Math.max(2, (r.count / max) * 100)}%"></i><em>${r.count}</em></div>`).join('') || '<small class="muted">记录胶片和相机后，统计会逐步形成。</small>'}</div>`;
 }
-async function job(kind, extra = {}, label) {
+async function job(kind, extra = {}, label, { onProgress } = {}) {
   const result = await api('/jobs', { method: 'POST', body: { kind, ...extra, label } });
-  if (['pdf', 'book-pdf'].includes(kind)) exportRequests.add(result.id);
+  if (['pdf', 'book-pdf'].includes(kind) && !onProgress) exportRequests.add(result.id);
+  if (onProgress) {
+    for (;;) {
+      const task = (await api('/jobs')).find((row) => row.id === result.id);
+      if (!task) throw Error('导出任务不存在');
+      onProgress(task);
+      if (task.state === 'completed') {
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        await saveExport(task);
+        await pollJobs();
+        return task;
+      }
+      if (['failed', 'cancelled', 'paused'].includes(task.state))
+        throw Error(task.error || '导出已停止，可以从后台任务继续');
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+  }
   $('#task-drawer').hidden = false;
   await pollJobs();
   toast(
@@ -3000,18 +3030,14 @@ async function action(name, value, element) {
       await api('/demo/open', { method: 'POST', body: { root: value } });
       location.reload();
       break;
-    case 'books': {
-      const list = await bookDesigner.list();
-      modal(
-        '定制摄影画册',
-        `<p>自由设计页面、图文与裁切，保存后导出含出血与裁切标记的 PDF。</p><button type="button" data-action="book-new">＋ 新建画册</button>${list.map((b) => `<div class="history-row"><b>${E(b.name)}</b><button type="button" data-action="book-open" data-value="${b.id}">编辑画册</button><button type="button" data-action="book-delete" data-value="${b.id}">移入回收站</button></div>`).join('')}`,
-        null,
-      );
+    case 'books':
+      await bookDesigner.shelf();
       break;
-    }
     case 'book-new':
       $('#editor').close();
-      await bookDesigner.open();
+      await bookDesigner.create({
+        filters: STATE.query?.rollId ? { rollId: STATE.query.rollId } : {},
+      });
       break;
     case 'book-open':
       $('#editor').close();
@@ -3328,38 +3354,13 @@ async function action(name, value, element) {
       });
       break;
     case 'project-book': {
-      const projectId = STATE.projectId,
-        title = STATE.boot.lists.projects.find((p) => p.id === projectId)?.name || '摄影项目',
-        result = await api(
-          '/photos?filter=' +
-            encodeURIComponent(
-              JSON.stringify({ projectId, stage: 'final', type: 'image', limit: 200 }),
-            ),
-        );
-      if (!result.total) throw Error('请先将照片标为定稿');
-      if (result.total > 200) throw Error('每册最多 200 页，请分批整理定稿');
-      const pages = result.items.map((photo) => ({
-        background: '#ffffff',
-        elements: [
-          {
-            id: photo.id,
-            type: 'image',
-            photoId: photo.id,
-            mediaId: photo.mediaId,
-            name: photo.name,
-            x: 8,
-            y: 8,
-            w: 194,
-            h: 194,
-            fit: 'contain',
-          },
-        ],
-      }));
-      const book = await api('/books', {
-        method: 'POST',
-        body: { name: title, width: 210, height: 210, pages },
+      const projectId = STATE.projectId;
+      const title = STATE.boot.lists.projects.find((p) => p.id === projectId)?.name || '摄影项目';
+      await bookDesigner.create({
+        name: title,
+        filters: { projectId, stage: 'final' },
+        groupBy: 'project',
       });
-      await bookDesigner.open(book.id);
       break;
     }
     case 'project-export':

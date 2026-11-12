@@ -2,111 +2,183 @@
   <img src="assets/icons/icon-256.png" width="92" height="92" alt="Film Album">
 </p>
 <h1 align="center">Film Album</h1>
-<p align="center">Organize film rolls and scans. Find the negative, the place and the photographs.</p>
+<p align="center">From a roll of film to a photography book.</p>
 <p align="center">
   <a href="README.md">简体中文</a> · English ·
   <a href="https://github.com/JackerKun/FilmAlbum/releases">Downloads</a> ·
-  <a href="#interface-tour">Interface tour</a> ·
-  <a href="docs/USER_GUIDE.md">Usage guide in Chinese</a>
+  <a href="docs/USER_GUIDE.md">Usage guide</a> ·
+  <a href="docs/photobook-studio.md">Photobook guide</a>
 </p>
 
-Film Album is a local workspace for film photography. Track shooting and development by roll, keep multiple scans of each frame, and turn your selections into photography projects, contact sheets or print-ready photobook layouts. It runs on macOS, Windows and in a local browser.
+Film Album is a local archive and photobook workspace for film photography. Record equipment, shooting, development and negative storage by roll; keep multiple scans of each frame; then turn your selections into projects, contact sheets and books. It runs on macOS, Windows and in a local browser.
 
-![Archive card view with the selected roll's metadata and shooting location](docs/screenshots/archive.webp)
+![Roll archive with filters, multiple rolls and a metadata sidebar](docs/screenshots/archive.webp)
 
-_The screenshots show the actual interface with **72 rolls and 1,442 visible frame records**. The documentation library reuses 17 AI-generated photographs and includes 135 and 120 film, scan versions, map locations, a project and a photobook._
+_These are fresh captures of the running application, using an isolated demo library with **72 rolls and 1,442 visible frame records**. The fixture reuses 17 AI-generated sample photographs and contains no personal photos. See [screenshot documentation](docs/screenshots/README.md). Source screenshots may include features not yet packaged in a stable Release. Screenshots use Simplified Chinese; documentation links below mostly lead to Chinese guides._
 
 ## Download and launch
 
-| Device                        | GitHub Release installer                      |
+Choose your installer from [GitHub Releases](https://github.com/JackerKun/FilmAlbum/releases):
+
+| Device                        | Installer                                     |
 | ----------------------------- | --------------------------------------------- |
 | Apple Silicon Mac (macOS 13+) | `FilmAlbum-<version>-mac-arm64.dmg`           |
 | Intel Mac (macOS 13+)         | `FilmAlbum-<version>-mac-x64.dmg`             |
 | Windows Intel / AMD x64       | `FilmAlbum-<version>-windows-x64-setup.exe`   |
 | Windows ARM64                 | `FilmAlbum-<version>-windows-arm64-setup.exe` |
 
-On Mac, open the DMG and drag the app into Applications. On Windows, run the installer or extract the entire ZIP before opening `Film Album.exe`. Desktop packages include their runtime. Use `SHA256SUMS` to verify your download. [GitHub Releases](https://github.com/JackerKun/FilmAlbum/releases)
+On Mac, open the DMG and drag the app into Applications. On Windows, run the installer or extract the entire ZIP before opening `Film Album.exe`. Desktop packages include their runtime. Use the release's `SHA256SUMS` to verify downloads.
 
-The desktop app checks for the latest stable GitHub Release in the background on startup. If a newer version is available, the download button opens the release page so you can decide when to install it. The Help menu offers a manual update check and a link to GitHub Releases. The local library remains usable offline.
+The app checks for the latest stable GitHub Release in the background at startup. A download link opens the release page; you decide when to install. The Help menu also offers a manual update check and a GitHub Releases link. The local library remains usable offline.
 
-## Interface tour
+## A workflow built around film
 
-The screenshots use Simplified Chinese. The top language selector switches the main navigation and common controls to English.
+| Stage                    | Tools                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| Create and archive rolls | Film stock, format, camera, lens, dates, development, tags and map locations               |
+| Find negatives           | Permanent codes, cabinet / box / binder / page / sleeve locations and QR labels            |
+| Scan and select          | Import preview, duplicate checks, scan versions, ratings, color labels and comparison      |
+| Organize a story         | Projects, chapters, candidate and final photographs, location maps                         |
+| Design a book            | Guided creation, categorized styles and sizes, spreads, stickers, masks, maps and captions |
+| Export and preserve      | Contact sheets, three PDF outputs, backups, offline previews and missing-file checks       |
 
 ### Roll archive and film strips
 
-Record the film stock, format, camera, date and shooting location when you create a roll. Add lens, development and physical storage details as you archive it. Use the permanent roll code or printed QR label to find the negative.
+Browse all rolls as cards, a table, a film shelf, film strips or a timeline. Load 50 rolls at a time as you scroll. Film strips start expanded for browsing several rolls vertically; individual 135 cassettes and 120 spools have distinct pull-out views. Back and Forward restore earlier browsing positions.
 
-Browse all rolls as cards, a table, a film shelf, film strips or a timeline. The archive loads 50 rolls at a time as you scroll. Film strips open extended, so you can scroll through several rolls vertically. Back and Forward beside the search field restore the previous view, filters and scroll position.
+Create rolls with film stock selection, date controls and a shooting location on the map. Batch editing uses field-appropriate controls: choose ratings, colors and states; type notes, tags and equipment names; set locations on a map.
 
-![Several film strips expanded in the roll archive](docs/screenshots/archive-film.webp)
+![Multiple expanded film strips in the archive](docs/screenshots/archive-film.webp)
 
 <details>
-<summary>New roll form, timeline and 135 / 120 film handling</summary>
+<summary>New roll, timeline and 135 / 120 film</summary>
 
-![New roll form with date controls, location map and film stock filters](docs/screenshots/new-roll.webp)
+![New roll with date, location and film stock controls](docs/screenshots/new-roll.webp)
 
-![Photographic timeline grouped by year and month](docs/screenshots/timeline.webp)
+![Shooting records grouped by year and month](docs/screenshots/timeline.webp)
 
-Open a roll and choose Film Strip. The 135 view shows a cassette and two rows of perforations. The 120 view shows a spool, backing paper and wide film. Drag the leader or use the slider to unroll it, then double-click a frame to review it.
-
-![135 cassette and perforated film strip](docs/screenshots/film-135.webp)
+![135 cassette and perforated film](docs/screenshots/film-135.webp)
 
 ![120 spools, backing paper and wide film](docs/screenshots/film-120.webp)
 
 </details>
 
-### Scan versions and light table
+### Review, scan versions and the memory map
 
-Preview roll grouping, frame numbers, order and duplicates before importing. Add rescans to the original frame and choose which scan is primary. Review one, two or four photographs with ratings, color labels and rejection flags. Use the thumbnails to move through the current results and press `I` for photo, roll and scan details, EXIF, histogram and location. Open a roll to export a contact sheet.
+Preview roll grouping, frame numbers, ordering and duplicates before importing. Attach rescans to the same frame and choose a primary version. Compare one, two or four photographs with ratings, color labels and rejection flags.
 
-![Photo review with thumbnails, RGB histogram and shooting location](docs/screenshots/lighttable.webp)
+The large-photo information panel brings together photo, roll and scan details, EXIF, histogram and location. Its map shortcut opens the memory map with the current roll selected. Contact sheets remain available as an export from a roll's toolbar.
 
-### Memory map
-
-Browse locations by roll or photograph. Preview a roll from its map marker, search for a place, or set the roll location by placing a pin. The map button beside the shooting location in the photo information panel opens the map with that roll selected.
-
-![Memory Map with locations and a Shanghai roll preview](docs/screenshots/map.webp)
+![Photo review with frame sequence, histogram and shooting location](docs/screenshots/lighttable.webp)
 
 <details>
-<summary>Find a roll to place on the map</summary>
+<summary>Memory map, roll placement and projects</summary>
 
-Combine year, format, film stock, location status, place, equipment and tags to find the right roll.
+Search places, place pins and preview rolls on the memory map. Combine year, format, film stock, location, equipment and tag filters to find a roll to place.
 
-![Roll placement picker with combined filters and paginated results](docs/screenshots/map-roll-picker.webp)
+![Memory map with a selected roll preview](docs/screenshots/map.webp)
+
+![Combined filters for finding rolls to place on the map](docs/screenshots/map-roll-picker.webp)
+
+Organize candidate and final photographs by chapter, arrange them on the curation canvas, or continue into a photobook.
+
+![Project chapters and photo sequence](docs/screenshots/projects.webp)
 
 </details>
 
-### Projects and photobooks
+## Turn photographs into a book
 
-Organize candidate and final photographs by chapter. Arrange them on the curation canvas or export a portfolio. In the photobook editor, filter assets, drag to crop, set millimeter coordinates and check bleed and image resolution before exporting an RGB PDF with crop marks.
+The studio guides you through **photo selection → style and structure → a complete first draft**. Filter by roll, camera and other metadata, Shift-select a range, or add matching photographs in bulk. Browse book sizes through proportional thumbnails, categories, orientation filters and search, or enter custom dimensions.
 
-![Photobook editor with assets, a selected photo frame and layout controls](docs/screenshots/photobook.webp)
+Choose from **12 categorized styles** for portfolios, travel, life events and film archives. Add covers, chapters, roll notes, location maps and a frame index. Books support up to 200 pages; adding all matching photos is limited to 1,200 per batch.
+
+![Photobook studio with spread editing, materials and properties](docs/screenshots/photobook.webp)
+
+### More room for the page
+
+- **Four views:** overview, spread, single page and reading preview. Zoom in and hold Space while dragging with the left mouse button to pan.
+- **Stable toolbars:** selecting different elements does not add or remove top tools. Crop, fit and photo swap controls live in the properties panel. Choose icons and text, icons only or text only.
+- **Panels under your control:** use edge handles to expand or collapse materials and properties. Overview respects your panel preferences too.
+- **Precise positioning:** align to the page, safe margins or selection; distribute elements evenly; use snapping, a millimetre grid and custom horizontal or vertical guides.
+- **Photos and decoration:** shape masks, text, 30 categorized film/camera stickers and custom images. Search a place, draw a rectangular map selection and insert it into a page.
+- **Reversible editing:** element context menus, locks, undo/redo and autosave. Displaced content remains available in the pending tray.
+
+In overview, click to select a page, double-click to edit, drag to reorder, or Shift-drag a chapter. Saved map snapshots travel with the book; editing guides stay out of reading preview and PDFs. See the [photobook guide](docs/photobook-studio.md).
 
 <details>
-<summary>Project photo sequence and library overview</summary>
+<summary>Photo selection, book sizes and styles</summary>
 
-![Photographic project with chapters, candidate and final photographs](docs/screenshots/projects.webp)
+![Roll and camera filters with Shift range selection](docs/screenshots/book-selection.webp)
 
-![Library overview with archive totals, preview coverage and storage volumes](docs/screenshots/library.webp)
+![Categorized book sizes with proportional previews](docs/screenshots/book-sizes.webp)
+
+![Guided style, chapter and appendix setup](docs/screenshots/book-builder.webp)
+
+![Categorized styles and page previews](docs/screenshots/book-styles.webp)
 
 </details>
 
-## Libraries and offline use
+<details>
+<summary>Page overview, stickers and maps</summary>
 
-| Mode            | Default library location                                       |
-| --------------- | -------------------------------------------------------------- |
-| macOS desktop   | `~/Library/Application Support/Film Album/library`             |
-| Windows desktop | `%APPDATA%/Film Album/library`                                 |
-| Local browser   | `data/` in the project, configurable with `FILMALBUM_DATA_DIR` |
+![Whole-book overview retains the materials panel and supports page reordering](docs/screenshots/book-overview.webp)
 
-Use File → Open Library to switch to a folder containing `catalog.sqlite`. You can reference originals on an external drive or NAS and generate previews for offline viewing. Reconnect the originals for print and original-file exports. The Library workspace supports integrity checks, trash recovery, and backup creation and verification.
+![Camera and lens sticker category](docs/screenshots/book-stickers.webp)
 
-Archiving, photo review and page layout run locally. Map tiles and place searches use the configured online map services. [Usage guide in Chinese](docs/USER_GUIDE.md)
+![Large map preview with location controls and rectangular selection; shown with the offline geographic diagram](docs/screenshots/book-map-insert.webp)
 
-## Run from source
+![Reading preview without editing panels](docs/screenshots/book-reading.webp)
 
-Install Node.js 22.13+ and npm. On macOS or in a Bash environment, use the root launch script.
+</details>
+
+### From reading preview to PDF
+
+Preflight checks missing originals, resolution, text overflow, safe margins, binding and page notes, with links back to affected pages. Export shows an animated waiting state and progress before offering the generated file for saving.
+
+| Output               | Purpose                                               |
+| -------------------- | ----------------------------------------------------- |
+| Reading PDF          | Screen reading, without bleed or crop marks           |
+| Print interior PDF   | Individual pages with configured bleed and crop marks |
+| Wraparound cover PDF | Back cover, spine and front cover on one sheet        |
+
+PDFs embed bundled Chinese fonts and retain masks, stickers and map snapshots. Output is currently **RGB**, without CMYK / PDF/X or printer imposition. Set dimensions, bleed, binding and spine width to your printer's requirements.
+
+### Photobook shortcuts
+
+| Action                                   | Shortcut                                                                |
+| ---------------------------------------- | ----------------------------------------------------------------------- |
+| Pan a zoomed workspace                   | Hold `Space` and drag with the left mouse button                        |
+| Zoom                                     | Slider, wheel or trackpad pinch; overview uses `Ctrl / Command` + wheel |
+| Temporarily bypass snapping              | Hold `Alt` while dragging                                               |
+| Constrain horizontal / vertical movement | Hold `Shift` while dragging                                             |
+| Select multiple elements / a photo range | `Shift` + click in the canvas / photo picker                            |
+| Nudge elements                           | Arrows: 1 mm; `Shift`: 10 mm; `Alt`: 0.1 mm                             |
+| Undo / redo                              | `Ctrl / Command + Z` / `Shift + Ctrl / Command + Z`                     |
+| Save immediately                         | `Ctrl / Command + S`; ordinary edits also autosave                      |
+| Turn pages in reading view               | Left / right arrow keys                                                 |
+
+## Local libraries and offline use
+
+| Mode            | Default library location                                |
+| --------------- | ------------------------------------------------------- |
+| macOS desktop   | `~/Library/Application Support/Film Album/library`      |
+| Windows desktop | `%APPDATA%/Film Album/library`                          |
+| Local browser   | Project `data/`, configurable with `FILMALBUM_DATA_DIR` |
+
+Use File → Open Library to switch to a folder containing `catalog.sqlite`. Reference originals on an external drive or NAS and generate previews before disconnecting. Photobook PDF, print and original-file exports require the originals to be connected. Library tools include missing-file checks, trash recovery, and backup creation and verification.
+
+Archiving, photo selection and layout run locally. Online map tiles, place searches and update checks require a connection. Saved book map snapshots work offline; the offline geographic diagram uses bundled Natural Earth data.
+
+<details>
+<summary>Library overview</summary>
+
+![Archive totals, preview coverage and storage status](docs/screenshots/library.webp)
+
+</details>
+
+## Preview from source
+
+Install **Node.js 22.13+** and npm. On macOS or in a Bash environment:
 
 ```bash
 git clone https://github.com/JackerKun/FilmAlbum.git
@@ -114,14 +186,26 @@ cd FilmAlbum
 ./start.sh
 ```
 
-You can also run `npm ci` followed by `npm run desktop` or start the local browser version with `npm run serve` and open `http://127.0.0.1:8091`. The native macOS image engine uses Xcode Command Line Tools in source mode.
+`start.sh` checks the environment, installs missing dependencies and starts the desktop app. Alternatively:
 
-Open `http://127.0.0.1:8091/?debug=1` to generate the smaller built-in demo. The README uses a dedicated capture library. Run `node scripts/screenshots.mjs` to reproduce it. [Screenshot generation](docs/screenshots/README.md)
+```bash
+npm ci
+npm run desktop
+```
 
-## Development and releases
+For the local browser version, run `npm run serve` and open `http://127.0.0.1:8091`. The native macOS image engine requires Xcode Command Line Tools when running from source. `?debug=1` provides a smaller built-in demo; these screenshots use a separate, larger fixture.
 
-Run `npm run check` for UI and syntax checks and `npm test` for the test suite. See the build matrix, packaging and draft Release workflow in the [build guide](BUILDING.md). [Architecture notes](docs/ARCHITECTURE.md)
+## Development and documentation
 
-This is preview software. Windows supports JPEG, PNG and TIFF scans. HEIC and camera RAW support depends on platform decoders. Default builds lack distribution signing and Apple notarization.
+```bash
+npm run check                   # UI entry points and script checks
+npm test                        # Automated tests
+node scripts/screenshots.mjs     # Main application screenshots
+node scripts/qa-photobook.mjs    # Book screenshots, interaction and PDF regression checks
+```
 
-The project uses `UNLICENSED`. Third-party components retain their own licenses. [Third-party licenses](packaging/THIRD-PARTY.md)
+[Usage guide](docs/USER_GUIDE.md) · [Photobook studio](docs/photobook-studio.md) · [Screenshots and fixtures](docs/screenshots/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Build and release](BUILDING.md)
+
+This is preview software. The Windows image engine supports JPEG, PNG, TIFF and WebP scans, but does not currently decode HEIC or camera RAW. Default release builds lack distribution signing and Apple notarization. The new photobook format has no dedicated migration workflow for old books.
+
+The project uses `UNLICENSED`. Third-party components retain their own licenses; see [third-party licenses](packaging/THIRD-PARTY.md).

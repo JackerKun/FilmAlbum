@@ -321,7 +321,8 @@ if (!app.requestSingleInstanceLock()) {
     );
     ses.setPermissionRequestHandler((contents, permission, callback) =>
       callback(
-        contents.getURL().startsWith(origin + '/') && permission === 'clipboard-sanitized-write',
+        contents.getURL().startsWith(origin + '/') &&
+          ['clipboard-sanitized-write', 'fullscreen'].includes(permission),
       ),
     );
     ses.on('will-download', (event, item) => {

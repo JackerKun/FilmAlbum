@@ -148,3 +148,17 @@ test('place lookup is explicit, validates coordinates, normalizes county details
   assert.deepEqual(a, b);
   assert.throws(() => service.query({ reverse: true, lat: 100, lon: 0 }), { status: 400 });
 });
+
+test('alignment supports rotated stickers, maps and text, with locked elements excluded', () => {
+  const elements = [
+    { id: 'a', type: 'sticker', x: 20, y: 20, w: 40, h: 20, rotation: 90 },
+    { id: 'b', type: 'map', x: 50, y: 30, w: 10, h: 10 },
+    { id: 'c', type: 'text', x: 60, y: 40, w: 20, h: 10, locked: true },
+  ];
+  alignElements(elements, ['a', 'b', 'c'], 'left', { width: 200, height: 260, safe: 10 });
+  assert.ok(Math.abs(elements[0].x) < 1e-8);
+  assert.equal(elements[1].x, 10);
+  assert.equal(elements[2].x, 60);
+  alignElements(elements, ['a'], 'center-y', { width: 200, height: 260 });
+  assert.equal(elements[0].y, 120);
+});

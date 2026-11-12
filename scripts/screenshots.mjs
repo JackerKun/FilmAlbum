@@ -257,13 +257,13 @@ try {
   );
   await navigate('archive');
   await click('[data-action="books"]');
-  await wait("document.querySelector('[data-action=book-open]')");
-  await click(`[data-action="book-open"][data-value="${demo.bookId}"]`);
+  await wait("document.querySelector('[data-open-book]')");
+  await click(`[data-open-book="${demo.bookId}"]`);
   await wait(
     "document.querySelector('.book-designer')?.open && document.querySelector('.book-paper img')?.naturalWidth>0",
   );
   await evaluate(
-    "const id=document.querySelector('.book-element img').closest('[data-element]').dataset.element;Array.from(document.querySelectorAll('[data-select-layer]')).find(b=>b.dataset.selectLayer===id).click()",
+    "const id=document.querySelector('.book-element img').closest('[data-element]').dataset.element;Array.from(document.querySelectorAll('[data-select]')).find(b=>b.dataset.select===id).click()",
   );
   await capture('photobook', "document.querySelector('.book-element.selected')");
   await navigate('storage');

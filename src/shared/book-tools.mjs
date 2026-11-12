@@ -1,3 +1,4 @@
+import { elementBounds } from './book-snapping.mjs';
 export const BOOK_PRESETS = [
   ['b6p', 'B6 小竖册', 125, 176],
   ['b6l', 'B6 小横册', 176, 125],
@@ -68,33 +69,46 @@ export function alignElements(
   const box =
     reference === 'selection' && chosen.length > 1
       ? {
-          left: Math.min(...chosen.map((e) => e.x)),
-          top: Math.min(...chosen.map((e) => e.y)),
-          right: Math.max(...chosen.map((e) => e.x + e.w)),
-          bottom: Math.max(...chosen.map((e) => e.y + e.h)),
+          left: Math.min(...chosen.map((e) => elementBounds(e).x)),
+          top: Math.min(...chosen.map((e) => elementBounds(e).y)),
+          right: Math.max(
+            ...chosen.map((e) => {
+              const b = elementBounds(e);
+              return b.x + b.w;
+            }),
+          ),
+          bottom: Math.max(
+            ...chosen.map((e) => {
+              const b = elementBounds(e);
+              return b.y + b.h;
+            }),
+          ),
         }
       : { left: safe, top: safe, right: width - safe, bottom: height - safe };
   for (const e of chosen) {
-    if (operation === 'left') e.x = box.left;
-    if (operation === 'right') e.x = box.right - e.w;
-    if (operation === 'center-x') e.x = (box.left + box.right - e.w) / 2;
-    if (operation === 'top') e.y = box.top;
-    if (operation === 'bottom') e.y = box.bottom - e.h;
-    if (operation === 'center-y') e.y = (box.top + box.bottom - e.h) / 2;
+    const b = elementBounds(e);
+    if (operation === 'left') e.x += box.left - b.x;
+    if (operation === 'right') e.x += box.right - b.x - b.w;
+    if (operation === 'center-x') e.x += (box.left + box.right - b.w) / 2 - b.x;
+    if (operation === 'top') e.y += box.top - b.y;
+    if (operation === 'bottom') e.y += box.bottom - b.y - b.h;
+    if (operation === 'center-y') e.y += (box.top + box.bottom - b.h) / 2 - b.y;
   }
   if (operation === 'distribute-x' || operation === 'distribute-y') {
     if (chosen.length < 3) return;
     const horizontal = operation.endsWith('x'),
       key = horizontal ? 'x' : 'y',
       size = horizontal ? 'w' : 'h',
-      rows = [...chosen].sort((a, b) => a[key] - b[key]),
-      start = rows[0][key],
-      end = rows.at(-1)[key] + rows.at(-1)[size],
-      gap = (end - start - rows.reduce((n, e) => n + e[size], 0)) / (rows.length - 1);
+      rows = [...chosen].sort((a, b) => elementBounds(a)[key] - elementBounds(b)[key]),
+      start = elementBounds(rows[0])[key],
+      end = elementBounds(rows.at(-1))[key] + elementBounds(rows.at(-1))[size],
+      gap =
+        (end - start - rows.reduce((n, e) => n + elementBounds(e)[size], 0)) / (rows.length - 1);
     let cursor = start;
     for (const e of rows) {
-      e[key] = cursor;
-      cursor += e[size] + gap;
+      const b = elementBounds(e);
+      e[key] += cursor - b[key];
+      cursor += b[size] + gap;
     }
   }
 }

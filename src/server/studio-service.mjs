@@ -2,7 +2,7 @@ import { attachmentHeader, mediaFileName, safeFileName } from '../shared/file-na
 import { previewStatus } from './preview-status.mjs';
 import { PlaceSearch } from './map-geocode.mjs';
 import { validateCustomStock } from '../shared/stock-catalog.mjs';
-import { bookStore, bookPreflight } from './books.mjs';
+import { bookStore, bookPreflight, bookPhoto } from './books.mjs';
 import { Worker } from 'node:worker_threads';
 import { Catalog, uid, json, parse, fail } from './catalog.mjs';
 import { Jobs } from './jobs.mjs';
@@ -618,7 +618,7 @@ export class StudioService {
           const book = store.get(bookRoute[1]);
           return send(
             bookRoute[2]
-              ? bookPreflight(book, (id) => this.c().query({ id, limit: 1 }).items[0])
+              ? bookPreflight(book, (id, mediaId) => bookPhoto(this.c(), id, mediaId))
               : book,
           );
         }
@@ -845,6 +845,8 @@ export class StudioService {
           201,
         );
       }
+      if (path === '/photos/query' && method === 'POST')
+        return send(this.c().query(await input(), 'photos'));
       if (path === '/photos' && method === 'GET') return send(this.c().query(filter(), 'photos'));
       const detail = /^\/(rolls|photos|projects|collections|versions)\/([^/]+)$/.exec(path);
       if (detail) {

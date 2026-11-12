@@ -19,5 +19,12 @@
     "file": "assets/ocr/chi_sim.traineddata.gz",
     "gzip": true,
     "sha256": "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730"
+  },
+  "fontSerif": {
+    "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Serif/SubsetOTF/SC/NotoSerifSC-Regular.otf",
+    "file": "assets/fonts/NotoSerifSC-Regular.otf",
+    "sha256": "e8f396decc1f0963a016a989c3d8852e863d1350996f573860a80767c83a1cd3",
+    "licenseUrl": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Serif/LICENSE",
+    "licenseFile": "assets/fonts/OFL.txt"
   }
 }

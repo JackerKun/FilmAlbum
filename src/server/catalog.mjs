@@ -646,6 +646,10 @@ export class Catalog {
         `CASE WHEN ${yearPrecision} THEN substr(${dateColumn},1,4)||'-01-01' WHEN ${monthPrecision} THEN substr(${dateColumn},1,7)||'-01' ELSE ${dateColumn} END<=? AND ${dateColumn}<>''`,
         query.to,
       );
+    if (photo && Array.isArray(query.excludeIds) && query.excludeIds.length) {
+      const ids = query.excludeIds.slice(0, 2000).map(String);
+      add(`p.id NOT IN (${ids.map(() => '?').join(',')})`, ...ids);
+    }
     if (query.place) add('instr(lower(r.location),lower(?))>0', String(query.place).trim());
     if (['135', '120', '220'].includes(query.medium))
       add('(r.format=? OR r.format LIKE ?)', query.medium, query.medium + '%');
@@ -808,6 +812,14 @@ export class Catalog {
           const rollData = parse(row.rollData);
           dto.physical = rollData.physical || {};
           dto.rollDatePrecision = rollData.datePrecision;
+          dto.rollNotes = rollData.notes || '';
+          dto.lab = rollData.lab || '';
+          dto.process = rollData.process || '';
+          if (query.projectId)
+            dto.chapter =
+              this.db
+                .prepare('SELECT chapter FROM project_items WHERE project_id=? AND photo_id=?')
+                .get(query.projectId, dto.id)?.chapter || '';
           dto.fileDateSource = parse(row.versionData).fileDateSource;
           dto.rollCoordinates = rollCoordinates(rollData);
           delete dto.rollData;

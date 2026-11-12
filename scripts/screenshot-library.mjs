@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { Catalog, uid } from '../src/server/catalog.mjs';
+import { createPhotobook } from '../src/shared/book-model.mjs';
 import { bookStore } from '../src/server/books.mjs';
 
 const scenes = [
@@ -168,43 +169,20 @@ export async function createScreenshotLibrary(home, sources) {
     await sharp(join(destination, 'media/demo-0.jpg'))
       .jpeg()
       .toFile(join(previews, offline + '-640.jpg'));
-    const book = bookStore(catalog).save({
-      name: 'Field Notes · 城市与远方',
-      width: 210,
-      height: 297,
-      bleed: 3,
-      safe: 10,
-      pages: [1, 0, 3, 5, 7, 10].map((scene, index) => ({
-        id: uid(),
-        background: '#f6f1e6',
-        elements: [
-          {
-            id: uid(),
-            type: 'image',
-            photoId: covers[scene].id,
-            mediaId: covers[scene].mediaId,
-            x: 12,
-            y: 12,
-            w: 186,
-            h: 196,
-            fit: 'cover',
-            cropX: 0.5,
-            cropY: 0.5,
-          },
-          {
-            id: uid(),
-            type: 'text',
-            x: 14,
-            y: 225,
-            w: 182,
-            h: 50,
-            text: `FIELD NOTES / 0${index + 1}\n${scenes[scene][0]}`,
-            fontSize: 20,
-            color: '#25382e',
-          },
-        ],
-      })),
-    });
+    const book = bookStore(catalog).save(
+      createPhotobook(
+        [1, 0, 3, 5, 7, 10].map(
+          (scene) => catalog.query({ id: covers[scene].id, limit: 1 }).items[0],
+        ),
+        {
+          name: 'Field Notes · 城市与远方',
+          theme: 'quiet',
+          density: 'airy',
+          author: '光、时间与胶片',
+          introduction: '六个地方，六段留在胶片上的记忆。',
+        },
+      ),
+    );
     const stats = catalog.stats();
     return {
       destination,

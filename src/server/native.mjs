@@ -20,7 +20,11 @@ export function nativeCapabilities() {
   };
 }
 export async function native(root, mode, ...args) {
-  if (process.platform !== 'darwin' || process.env.FILMALBUM_ENGINE === 'portable')
+  if (
+    mode === 'bookpdf' ||
+    process.platform !== 'darwin' ||
+    process.env.FILMALBUM_ENGINE === 'portable'
+  )
     return (await import('./portable-native.mjs')).portableNative(root, mode, ...args);
   if (process.env.FILMALBUM_NATIVE_BINARY) {
     const { stdout } = await exec(
