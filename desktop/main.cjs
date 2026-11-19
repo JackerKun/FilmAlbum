@@ -21,10 +21,12 @@ const {
 const { randomBytes } = require('node:crypto');
 const { checkForUpdate, releasesUrl } = require('./update-check.cjs');
 app.setName('Film Album');
-// Isolated smoke-test profiles and normal library sessions need separate locks.
-const userData = process.env.FILMALBUM_DESKTOP_DATA_DIR
+const demo = process.argv.includes('--demo');
+// Separate profiles give the normal and demo libraries separate sessions and locks.
+const profile = process.env.FILMALBUM_DESKTOP_DATA_DIR
   ? resolve(process.env.FILMALBUM_DESKTOP_DATA_DIR)
   : app.getPath('userData');
+const userData = demo ? profile + ' Demo' : profile;
 app.setPath('userData', userData);
 app.setPath('sessionData', join(userData, 'session'));
 if (!app.requestSingleInstanceLock()) {
@@ -275,6 +277,7 @@ if (!app.requestSingleInstanceLock()) {
       ...process.env,
       PORT: '0',
       FILMALBUM_DATA_DIR: data,
+      FILMALBUM_STARTUP_DEMO: demo ? '1' : '0',
       FILMALBUM_DESKTOP_TOKEN: token,
       FILMALBUM_ASSET_DIR: join(root, 'assets'),
     };
@@ -284,7 +287,10 @@ if (!app.requestSingleInstanceLock()) {
       env.FILMALBUM_NATIVE_BINARY = nativeBinary;
     else if (app.isPackaged) env.FILMALBUM_ENGINE = 'portable';
     readyPromise = new Promise((resolveReady, reject) => {
-      const timeout = setTimeout(() => reject(Error('本地服务启动超时，请查看日志文件。')), 60000);
+      const timeout = setTimeout(
+        () => reject(Error('本地服务启动超时，请查看日志文件。')),
+        demo ? 240000 : 60000,
+      );
       backend = utilityProcess.fork(join(root, 'desktop', 'backend.cjs'), [], {
         cwd: root,
         env,

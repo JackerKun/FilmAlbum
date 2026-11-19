@@ -231,9 +231,8 @@ export function installLocale() {
   const translate = (text) => {
     const trim = text.trim();
     if (words[trim]) return text.replace(trim, words[trim]);
-    return text.replace(
-      /(▤|▦|◫|◎|▧|＋|↶|▣|⚄)\s*(.+)/,
-      (_, icon, t) => icon + ' ' + (words[t] || t),
+    return text.replace(/(▤|▦|◫|◎|▧|＋|↶|▣|⚄|◉|○|🔴|🟡|🟢|🔵|🟣)\s*(.+)/, (match, icon, t) =>
+      words[t] ? icon + ' ' + words[t] : match,
     );
   };
   function apply() {

@@ -85,7 +85,6 @@ const STATE = {
   editor: null,
   request: 0,
   layout: {},
-  importFiles: [],
   uploadSources: new Map(),
   uploading: new Set(),
   uploadPaused: new Set(),
@@ -97,6 +96,7 @@ const STATE = {
   curationScale: 1,
 };
 let searchTimer, commandTimer, pollTimer, landData, closeMenuTimer;
+let activeImport;
 let navigationEntry,
   navigationEnd = 0;
 const navigationSnapshots = new Map(),
@@ -179,8 +179,124 @@ const option = (value, label, selected) =>
   `<option value="${E(value)}" ${String(value) === String(selected) ? 'selected' : ''}>${E(label)}</option>`;
 const select = (name, items, value = '', attributes = '') =>
   `<select name="${E(name)}" ${attributes}>${items.map((item) => option(item[0], item[1], value)).join('')}</select>`;
+const PHOTO_COLORS = [
+  ['red', '红色', '🔴'],
+  ['yellow', '黄色', '🟡'],
+  ['green', '绿色', '🟢'],
+  ['blue', '蓝色', '🔵'],
+  ['purple', '紫色', '🟣'],
+];
+const customizableSelect =
+  CSS.supports('appearance: base-select') && CSS.supports('selector(::picker(select))');
+function colorOptions(value = '', { mode = 'edit' } = {}) {
+  const items = [
+    ...(mode === 'filter' ? [['', '全部色标', '◉', 'all']] : []),
+    ...(mode === 'batch' ? [['', '请选择', '', 'none']] : []),
+    [mode === 'edit' ? '' : 'none', '无色标', '○', 'none'],
+    ...PHOTO_COLORS,
+  ];
+  if (!customizableSelect)
+    return items
+      .map(([key, label, icon]) => option(key, icon ? `${icon} ${label}` : label, value))
+      .join('');
+  return `<button><selectedcontent></selectedcontent></button>${items.map(([key, label, , swatch = key]) => `<option value="${key}" ${key === value ? 'selected' : ''}><span class="color-dot ${swatch}" aria-hidden="true"></span><span class="color-option-name">${label}</span></option>`).join('')}`;
+}
 const field = (name, label, value = '', type = 'text', attrs = '') =>
   `<label>${E(label)}<input name="${E(name)}" type="${type}" value="${E(value)}" ${attrs}></label>`;
+function equipmentField(name, value = '', scope = 'editor') {
+  const label = name === 'camera' ? '相机' : '镜头';
+  const id = `${scope}-equipment-${name}`;
+  return `<div class="equipment-field" data-equipment-field><label for="${id}">${label}</label><div class="equipment-control"><input id="${id}" name="${name}" type="text" value="${E(value)}" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${id}-choices"><button type="button" tabindex="-1" aria-label="显示已有${label}">⌄</button></div><div id="${id}-choices" class="equipment-choices" role="listbox" aria-label="已有${label}" hidden></div></div>`;
+}
+
+function bindEquipmentFields(host, onCommit) {
+  for (const field of host.querySelectorAll('[data-equipment-field]')) {
+    const input = field.querySelector('input');
+    const toggle = field.querySelector('button');
+    const list = field.querySelector('[role=listbox]');
+    let names = [],
+      activeIndex = -1;
+
+    function close() {
+      list.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
+      input.removeAttribute('aria-activedescendant');
+      activeIndex = -1;
+    }
+    function show(query = '') {
+      const normalize = (value) => value.trim().normalize('NFKC').toLowerCase();
+      const search = normalize(query);
+      names = [
+        ...new Set((STATE.boot.facets?.[input.name] || []).map(({ value }) => value.trim())),
+      ].filter((name) => name && normalize(name).includes(search));
+      close();
+      list.innerHTML = names
+        .map(
+          (name, i) =>
+            `<button type="button" id="${list.id}-${i}" data-equipment-index="${i}" role="option" aria-selected="false" tabindex="-1">${E(name)}</button>`,
+        )
+        .join('');
+      if (!names.length) return;
+      list.hidden = false;
+      list.scrollTop = 0;
+      input.setAttribute('aria-expanded', 'true');
+    }
+    function choose(index) {
+      input.value = names[index];
+      close();
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    input.onfocus = () => show();
+    input.oninput = () => show(input.value);
+    input.onblur = close;
+    input.onchange = () => onCommit?.(input);
+    input.onkeydown = (event) => {
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key === 'Escape' && !list.hidden) {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (list.hidden) show();
+        if (list.hidden) return;
+        event.preventDefault();
+        list.children[activeIndex]?.setAttribute('aria-selected', 'false');
+        const delta = event.key === 'ArrowDown' ? 1 : -1;
+        activeIndex =
+          activeIndex < 0 && delta < 0
+            ? names.length - 1
+            : (activeIndex + delta + names.length) % names.length;
+        const option = list.children[activeIndex];
+        option.setAttribute('aria-selected', 'true');
+        input.setAttribute('aria-activedescendant', option.id);
+        if (option.offsetTop < list.scrollTop) list.scrollTop = option.offsetTop;
+        else if (option.offsetTop + option.offsetHeight > list.scrollTop + list.clientHeight)
+          list.scrollTop = option.offsetTop + option.offsetHeight - list.clientHeight;
+      } else if (event.key === 'Enter' && activeIndex >= 0) {
+        event.preventDefault();
+        choose(activeIndex);
+      } else if (event.key === 'Enter' && onCommit) {
+        event.preventDefault();
+        close();
+        onCommit(input);
+      }
+    };
+    for (const node of [toggle, list])
+      node.onpointerdown = (event) => {
+        if (event.target.closest('button')) event.preventDefault();
+      };
+    toggle.onclick = () => {
+      const wasOpen = !list.hidden;
+      input.focus();
+      if (wasOpen) close();
+      else show();
+    };
+    list.onclick = (event) => {
+      const option = event.target.closest('[data-equipment-index]');
+      if (option) choose(Number(option.dataset.equipmentIndex));
+    };
+  }
+}
 const datePrecisions = [
   ['day', '具体日期'],
   ['month', '月份'],
@@ -216,6 +332,8 @@ function dateFields(value = '', precision = 'day', { name = 'date', required = f
   return `<div class="date-fields wide" data-date-name="${name}" data-date-required="${required}" data-date-value="${E(value)}"><label>日期精度${select(precisionName, datePrecisions, precision, 'data-date-precision')}</label><div class="date-value">${dateValueControl(name, value, precision, required)}</div></div>`;
 }
 function modal(title, html, submit, label = '保存', kicker = 'FILM ALBUM STUDIO') {
+  activeImport?.dispose();
+  STATE.resumeUploadId = null;
   STATE.editor = submit;
   $('#editor-title').textContent = title;
   $('#editor-kicker').textContent = kicker;
@@ -534,19 +652,16 @@ function renderQuery() {
       ['5', '★5'],
     ]
       .map(([v, l]) => option(v, l, q.rating))
-      .join('')}</select><select data-filter="color" aria-label="照片色标">${[
-      ['', '全部色标'],
-      ['none', '无色标'],
-      ['red', '红色'],
-      ['yellow', '黄色'],
-      ['green', '绿色'],
-      ['blue', '蓝色'],
-      ['purple', '紫色'],
-    ]
-      .map(([v, l]) => option(v, l, q.color))
-      .join('')}</select>`;
-  else
+      .join(
+        '',
+      )}</select><select class="photo-color-select" data-filter="color" aria-label="照片色标">${colorOptions(q.color, { mode: 'filter' })}</select>`;
+  else {
     html += `<select data-filter="stock" aria-label="胶片型号">${option('', '全部胶片', q.stock)}${(STATE.boot.facets?.stock || []).map((s) => option(s.value, STOCKS[s.value]?.name || s.value, q.stock)).join('')}</select>`;
+    const tags = new Set((STATE.boot.facets?.rollTags || []).map(({ value }) => value));
+    if (q.rollTag) tags.add(q.rollTag);
+    if (tags.size)
+      html += `<select data-filter="rollTag" aria-label="胶卷标签">${option('', '全部胶卷标签', q.rollTag)}${[...tags].map((tag) => option(tag, tag, q.rollTag)).join('')}</select>`;
+  }
   html += `<button class="soft" data-action="filters">组合筛选${q.rules?.conditions?.length ? ' ' + q.rules.conditions.length : ''}</button><button class="text" data-action="reset-filters">重置</button>${q.rollId ? '<button class="text" data-action="exit-roll">返回全库</button>' : ''}${q.collectionId ? '<span class="badge">收藏范围</span>' : ''}${q.semantic ? '<span class="badge">语义线索</span>' : ''}`;
   if (STATE.projectId) {
     const p = STATE.boot.lists.projects.find((p) => p.id === STATE.projectId);
@@ -559,6 +674,7 @@ function renderQuery() {
     ['from', '从'],
     ['to', '至'],
     ['tag', '标签'],
+    ['rollTag', '胶卷标签'],
   ].filter(([key]) => q[key]);
   if (active.length)
     html += `<div class="active-query-filters">${active.map(([key, label]) => `<button class="soft" data-action="remove-query-filter" data-value="${key}">${label} · ${E(q[key])} ×</button>`).join('')}</div>`;
@@ -957,6 +1073,7 @@ function pickRecord(id, entity, event = {}) {
   renderInspector(row, entity);
 }
 function resetInspector() {
+  closeVersionPreview();
   disposeInspectorMap?.();
   disposeInspectorMap = null;
   $('#inspector').innerHTML =
@@ -980,6 +1097,7 @@ async function inspect(id, entity, tab) {
     renderInspector(STATE.entities.get(id), entity);
 }
 function renderInspector(row, entity) {
+  closeVersionPreview();
   disposeInspectorMap?.();
   disposeInspectorMap = null;
   if (!row) return;
@@ -1005,6 +1123,8 @@ function renderInspector(row, entity) {
       .join(
         '',
       )}</div></header><div class="inspector-body">${roll ? rollInspector(row, tab) : photoInspector(row, tab)}</div>`;
+  if (roll && tab === 'details')
+    bindEquipmentFields($('#inspector'), (input) => saveRollEquipment(row.id, input));
   const mapHost = $('#inspector').querySelector('[data-roll-map-preview]');
   if (mapHost)
     disposeInspectorMap = mountLocationPreview(
@@ -1023,20 +1143,181 @@ function rollInspector(r, tab) {
     return `${field('exposureIndex', '实际曝光指数 EI', r.exposureIndex, 'number', 'min="1" max="102400" data-inspect-field')}${field('processType', '冲洗方式', r.processType, 'text', 'data-inspect-field')}${field('lab', '冲洗店家', r.lab, 'text', 'data-inspect-field')}<label>冲洗记录<textarea name="process" rows="4" data-inspect-field>${E(r.process || '')}</textarea></label><label>归档备注<textarea name="notes" rows="5" data-inspect-field>${E(r.notes || '')}</textarea></label><div class="two-cols">${field('latitude', '纬度', r.latitude ?? '', 'number', 'step="any" data-inspect-field')}${field('longitude', '经度', r.longitude ?? '', 'number', 'step="any" data-inspect-field')}</div><div class="inspector-actions"><button data-action="map-selected">在地图中查看</button><button data-action="save-film-preset">保存为胶卷模板</button><button data-action="trash-focus">放入回收站</button></div>`;
   const coordinates = rollCoordinates(r);
   const location = `<section class="roll-location"><small>地点</small><strong>${E(r.location || (coordinates ? '未命名地点' : '未设置地点'))}</strong>${coordinates ? `<div class="roll-location-preview" data-roll-map-preview aria-label="胶卷拍摄位置"></div><small>${coordinateLabel(coordinates)}</small>` : r.location ? '<small>尚未在地图定位</small>' : ''}<div class="inspector-actions"><button data-action="edit-roll-location" data-value="${E(r.id)}">在地图设置</button>${coordinates ? `<button data-action="map-selected" data-value="${E(r.id)}">回忆地图</button>` : ''}</div></section>`;
-  return `${field('name', '胶卷名称', r.name, 'text', 'data-inspect-field')}<label>胶片${select(
-    'stock',
-    Object.entries(STOCKS).map(([id, s]) => [id, s.brand + ' ' + s.name]),
-    r.stock,
-    'data-inspect-field',
-  )}</label><div class="two-cols"><label>画幅${select(
+  return `${field('name', '胶卷名称', r.name, 'text', 'data-inspect-field')}<div class="inspector-stock"><span>胶片</span><button type="button" class="soft" data-action="edit-roll-stock" data-value="${E(r.id)}" aria-haspopup="dialog"><strong>${E(stockName(r.stock) || '未设置型号')}</strong><small>更换</small></button></div><div class="two-cols"><label>画幅${select(
     'format',
     ['135', '120 · 6×4.5', '120 · 6×6', '120 · 6×7', '120 · 6×9', '120 · 6×12', '120 · 6×17'].map(
       (v) => [v, v],
     ),
     r.format,
     'data-inspect-field',
-  )}</label><label>状态${select('status', Object.entries(STATUS), r.status, 'data-inspect-field')}</label></div>${field('camera', '相机', r.camera, 'text', 'data-inspect-field')}${field('lens', '镜头', r.lens, 'text', 'data-inspect-field')}${location}<div class="inspector-date">${dateFields(r.date, r.datePrecision)}<button class="soft" data-action="save-roll-date">保存拍摄日期</button></div>${field('project', '拍摄项目', r.project, 'text', 'data-inspect-field')}<div class="inspector-actions"><button data-action="roll-photos" data-value="${E(r.id)}">查看整卷照片</button><button data-action="import-roll" data-value="${E(r.id)}">装入影像</button><button data-action="inspect-tab" data-value="physical">定位底片</button></div>`;
+  )}</label><label>状态${select('status', Object.entries(STATUS), r.status, 'data-inspect-field')}</label></div>${equipmentField('camera', r.camera, 'inspector')}${equipmentField('lens', r.lens, 'inspector')}${rollTagSection(r)}${location}<div class="inspector-date">${dateFields(r.date, r.datePrecision)}<button class="soft" data-action="save-roll-date">保存拍摄日期</button></div>${field('project', '拍摄项目', r.project, 'text', 'data-inspect-field')}<div class="inspector-actions"><button data-action="roll-photos" data-value="${E(r.id)}">查看整卷照片</button><button data-action="import-roll" data-value="${E(r.id)}">装入影像</button><button data-action="inspect-tab" data-value="physical">定位底片</button></div>`;
 }
+function rollTagSection(roll) {
+  const tags = Array.isArray(roll.tags) ? roll.tags : [];
+  return `<section class="roll-tag-section"><div><span>胶卷标签</span><button type="button" class="text" data-action="edit-roll-tags" data-value="${E(roll.id)}" aria-haspopup="dialog">编辑标签</button></div>${tags.length ? `<div class="roll-tags">${tags.map((tag) => `<button type="button" class="roll-tag" data-action="filter-roll-tag" data-value="${E(tag)}" data-user-content>${E(tag)}</button>`).join('')}</div>` : '<small class="muted">还没有胶卷标签</small>'}</section>`;
+}
+
+function editRollTags(roll) {
+  const tags = new Set(Array.isArray(roll.tags) ? roll.tags : []);
+  modal(
+    '编辑胶卷标签',
+    `<div class="roll-tag-editor"><p class="form-note" data-user-content>${E(roll.name)} · ${E(roll.code)}</p><div class="roll-tags" data-roll-tags aria-live="polite"></div><div class="roll-tag-entry"><label>添加标签<input type="text" name="tag" placeholder="输入标签，或选择已有标签" autocomplete="off" list="existing-roll-tags" autofocus></label><button type="button" class="soft" data-add-roll-tags>添加</button></div><datalist id="existing-roll-tags">${(
+      STATE.boot.facets?.rollTags || []
+    )
+      .filter(({ value }) => !tags.has(value))
+      .map(({ value }) => option(value, value))
+      .join(
+        '',
+      )}</datalist><small class="muted">可以用逗号分隔多个标签。保存后可按标签检索这卷。</small></div>`,
+    async () => {
+      addTags();
+      if (JSON.stringify([...tags]) === JSON.stringify(roll.tags || [])) return;
+      const loadedPage = archivePager?.page || 0;
+      await patchRecord('rolls', roll.id, { tags: [...tags] });
+      await bootstrap();
+      renderQuery();
+      await refresh(loadedPage);
+    },
+    '保存标签',
+  );
+  const host = $('#editor .roll-tag-editor');
+  const input = host.querySelector('[name=tag]');
+  const list = host.querySelector('[data-roll-tags]');
+  function renderTags() {
+    list.innerHTML =
+      [...tags]
+        .map(
+          (tag) =>
+            `<span class="roll-tag"><span data-user-content>${E(tag)}</span><button type="button" data-remove-roll-tag="${E(tag)}" aria-label="移除标签 ${E(tag)}">×</button></span>`,
+        )
+        .join('') || '<p class="muted">还没有胶卷标签</p>';
+  }
+  function addTags() {
+    for (const tag of input.value
+      .split(/[,，]/)
+      .map((value) => value.trim())
+      .filter(Boolean))
+      tags.add(tag);
+    input.value = '';
+    renderTags();
+  }
+  host.querySelector('[data-add-roll-tags]').onclick = () => {
+    addTags();
+    input.focus();
+  };
+  input.onkeydown = (event) => {
+    if (
+      event.key === 'Enter' &&
+      !event.isComposing &&
+      event.keyCode !== 229 &&
+      input.value.trim()
+    ) {
+      event.preventDefault();
+      addTags();
+    }
+  };
+  list.onclick = (event) => {
+    const button = event.target.closest('[data-remove-roll-tag]');
+    if (!button) return;
+    tags.delete(button.dataset.removeRollTag);
+    renderTags();
+    input.focus();
+  };
+  renderTags();
+}
+
+function scanVersionRow(v, primary) {
+  const id = E(v.id),
+    name = E(v.name);
+  const thumbnail =
+    v.mediaId && !v.mime?.startsWith('video/')
+      ? `<button type="button" class="version-thumbnail" data-action="view-version" data-value="${id}" data-version-preview="${thumb(v.mediaId, 1600)}" data-version-name="${name}" aria-label="查看扫描版本：${name}"><img src="${thumb(v.mediaId, 320)}" alt="" loading="lazy" decoding="async"></button>`
+      : '<span class="version-thumbnail version-no-preview">无预览</span>';
+  return `<div class="version-row"><div class="version-summary">${thumbnail}<div class="version-meta"><b>${name}</b>${primary ? ' <span class="badge">主版本</span>' : ''}<p>${E({ scan: '扫描原版', rescan: '重扫', edit: '调色版本', export: '导出副本' }[v.kind] || v.kind)} · ${bytes(v.size)} · ${E(v.availability)}</p></div></div><div class="version-actions"><button data-action="view-version" data-value="${id}">查看</button>${primary ? '' : `<button data-action="primary-version" data-value="${id}">设为主版本</button><button data-action="compare-version" data-value="${id}">与主版本对比</button>`}<button data-action="rename-version" data-value="${id}">命名</button></div></div>`;
+}
+
+let versionPreviewTimer, versionPreview;
+function closeVersionPreview() {
+  clearTimeout(versionPreviewTimer);
+  versionPreview?.remove();
+  versionPreview = null;
+}
+
+function showVersionPreview(anchor) {
+  if (!anchor.getClientRects().length) return;
+  const popup = document.createElement('figure');
+  popup.className = 'version-preview';
+  popup.setAttribute('aria-hidden', 'true');
+  const frame = document.createElement('div');
+  frame.className = 'version-preview-frame';
+  const image = new Image();
+  image.alt = '';
+  image.hidden = true;
+  const status = document.createElement('span');
+  status.textContent = '正在载入预览…';
+  image.onload = () => {
+    image.hidden = false;
+    status.hidden = true;
+  };
+  image.onerror = () => (status.textContent = '暂无预览 · 连接原片后重试');
+  const caption = document.createElement('figcaption');
+  caption.textContent = anchor.dataset.versionName;
+  frame.append(image, status);
+  popup.append(frame, caption);
+  document.body.append(popup);
+  versionPreview = popup;
+
+  // Anchor outside the scrolling inspector and keep the preview inside the window.
+  const gap = 12;
+  const rect = anchor.getBoundingClientRect();
+  const { clientWidth: width, clientHeight: height } = document.documentElement;
+  const leftRoom = rect.left - gap * 2;
+  const rightRoom = width - rect.right - gap * 2;
+  const sideRoom = Math.max(leftRoom, rightRoom);
+  const side = sideRoom >= 200;
+  const popupWidth = Math.min(440, side ? sideRoom : width - gap * 2);
+  popup.style.width = popupWidth + 'px';
+  const popupHeight = popup.offsetHeight;
+  const left = side
+    ? leftRoom >= rightRoom
+      ? rect.left - gap - popupWidth
+      : rect.right + gap
+    : rect.right - popupWidth;
+  const top = side
+    ? rect.top + (rect.height - popupHeight) / 2
+    : rect.bottom + popupHeight + gap * 2 <= height
+      ? rect.bottom + gap
+      : rect.top - popupHeight - gap;
+  popup.style.left = Math.max(gap, Math.min(left, width - popupWidth - gap)) + 'px';
+  popup.style.top = Math.max(gap, Math.min(top, height - popupHeight - gap)) + 'px';
+  image.src = anchor.dataset.versionPreview;
+}
+
+const inspector = $('#inspector');
+inspector.addEventListener('pointerover', (event) => {
+  const anchor = event.target.closest('[data-version-preview]');
+  if (!anchor || event.pointerType === 'touch' || anchor.contains(event.relatedTarget)) return;
+  closeVersionPreview();
+  versionPreviewTimer = setTimeout(() => showVersionPreview(anchor), 150);
+});
+inspector.addEventListener('pointerout', (event) => {
+  const anchor = event.target.closest('[data-version-preview]');
+  if (anchor && !anchor.contains(event.relatedTarget)) closeVersionPreview();
+});
+inspector.addEventListener('focusin', (event) => {
+  if (event.target.matches('[data-version-preview]:focus-visible')) {
+    closeVersionPreview();
+    showVersionPreview(event.target);
+  }
+});
+inspector.addEventListener('focusout', (event) => {
+  if (event.target.matches('[data-version-preview]')) closeVersionPreview();
+});
+inspector.addEventListener('click', closeVersionPreview);
+window.addEventListener('scroll', closeVersionPreview, { capture: true, passive: true });
+window.addEventListener('resize', closeVersionPreview);
+window.addEventListener('blur', closeVersionPreview);
+
 function photoInspector(p, tab) {
   if (tab === 'exif') {
     const exif = p.exif || {};
@@ -1072,20 +1353,8 @@ function photoInspector(p, tab) {
       )}</p>${p.analysis?.text ? `<label>识别文字<textarea readonly rows="4">${E(p.analysis.text)}</textarea></label>` : ''}<small>线索用于辅助查找，不会改写人工标签。</small></section><div class="inspector-actions"><button data-action="inspect-roll">查看胶卷档案</button><button data-action="photo-analyze">分析此张影像</button><button data-action="locate-negative">定位原始底片</button></div>`;
   }
   if (tab === 'versions')
-    return `<p class="form-note">同一格底片可收纳店扫、自扫、重扫和调色版本。主版本用于默认预览。</p>${(p.versions || []).map((v) => `<div class="version-row"><b>${E(v.name)}</b>${p.primary_version === v.id ? ' <span class="badge">主版本</span>' : ''}<p>${E({ scan: '扫描原版', rescan: '重扫', edit: '调色版本', export: '导出副本' }[v.kind] || v.kind)} · ${bytes(v.size)} · ${E(v.availability)}</p><div><button data-action="view-version" data-value="${E(v.id)}">查看</button>${p.primary_version !== v.id ? `<button data-action="primary-version" data-value="${E(v.id)}">设为主版本</button><button data-action="compare-version" data-value="${E(v.id)}">与主版本对比</button>` : ''}<button data-action="rename-version" data-value="${E(v.id)}">命名</button></div></div>`).join('')}<button class="soft" data-action="import-version">＋ 加入扫描版本</button>`;
-  return `<div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button data-action="rate" data-value="${n}" class="${n <= p.rating ? 'active' : ''}" aria-label="${n} 星">★</button>`).join('')}</div>${field('name', '照片名称', p.name, 'text', 'data-inspect-field')}${field('frameNo', '底片边码 / 格号', p.frameNo || '', 'text', 'data-inspect-field')}${field('strip', '底片条号', p.strip || '', 'text', 'data-inspect-field')}<div class="two-cols"><label>色标${select(
-    'color',
-    [
-      ['', '无色标'],
-      ['red', '红色'],
-      ['yellow', '黄色'],
-      ['green', '绿色'],
-      ['blue', '蓝色'],
-      ['purple', '紫色'],
-    ],
-    p.color,
-    'data-inspect-field',
-  )}</label><label>选片${select(
+    return `<p class="form-note">同一格底片可收纳店扫、自扫、重扫和调色版本。主版本用于默认预览。</p>${(p.versions || []).map((v) => scanVersionRow(v, p.primary_version === v.id)).join('')}<button class="soft" data-action="import-version">＋ 加入扫描版本</button>`;
+  return `<div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button data-action="rate" data-value="${n}" class="${n <= p.rating ? 'active' : ''}" aria-label="${n} 星">★</button>`).join('')}</div>${field('name', '照片名称', p.name, 'text', 'data-inspect-field')}${field('frameNo', '底片边码 / 格号', p.frameNo || '', 'text', 'data-inspect-field')}${field('strip', '底片条号', p.strip || '', 'text', 'data-inspect-field')}<div class="two-cols"><label>色标<select name="color" class="photo-color-select" data-inspect-field>${colorOptions(p.color)}</select></label><label>选片${select(
     'rejected',
     [
       ['0', '保留'],
@@ -1095,7 +1364,7 @@ function photoInspector(p, tab) {
     'data-inspect-field',
   )}</label></div>${field('tags', '照片标签（逗号分隔）', (p.tags || []).join(', '), 'text', 'data-inspect-field')}<label>备注<textarea name="notes" rows="3" data-inspect-field>${E(p.notes || '')}</textarea></label><div class="inspector-actions"><button data-action="review-focus">进入看片台</button><button data-action="inspect-tab" data-value="versions">扫描版本 ${p.versionCount || 1}</button><button data-action="locate-negative">找到底片</button><button data-action="photo-location">设置拍摄位置</button><button class="soft" data-action="download-original" data-value="${E(p.id)}" ${['offline', 'missing'].includes(p.availability) ? 'disabled title="请连接原片后再导出；预览不能代替原片"' : ''}>导出原片…</button><button data-action="set-roll-cover">设为胶卷封面</button><button data-action="trash-focus">回收站</button></div>`;
 }
-async function patchRecord(entity, id, patch) {
+async function patchRecord(entity, id, patch, { updateInspector = true } = {}) {
   const row = STATE.entities.get(id) || (await api('/' + entity + '/' + encodeURIComponent(id))),
     updated = await api('/' + entity + '/' + encodeURIComponent(id), {
       method: 'PATCH',
@@ -1103,8 +1372,27 @@ async function patchRecord(entity, id, patch) {
     });
   STATE.entities.set(id, { ...row, ...updated });
   $('#save-status').textContent = '已保存 · ' + new Date().toLocaleTimeString('zh-CN');
-  if (STATE.focus?.id === id) renderInspector(STATE.entities.get(id), entity);
+  if (updateInspector && STATE.focus?.id === id) renderInspector(STATE.entities.get(id), entity);
   return STATE.entities.get(id);
+}
+let equipmentSave = Promise.resolve();
+function saveRollEquipment(id, input) {
+  const name = input.name;
+  const value = input.value.trim();
+  const root = STATE.boot.root;
+  input.value = value;
+  equipmentSave = equipmentSave
+    .then(async () => {
+      if (STATE.boot.root !== root || value === (STATE.entities.get(id)?.[name] || '')) return;
+      const loadedPage = archivePager?.page || 0;
+      await patchRecord('rolls', id, { [name]: value }, { updateInspector: false });
+      await bootstrap();
+      await refresh(loadedPage);
+    })
+    .catch((error) => {
+      if (input.value === value) input.value = STATE.entities.get(id)?.[name] || '';
+      toast(error.message, 'warning');
+    });
 }
 async function saveRollDate(id, date, datePrecision) {
   await patchRecord('rolls', id, { date, datePrecision });
@@ -1150,6 +1438,7 @@ const bookDesigner = createBookDesigner({
   }),
 });
 const localeControl = installLocale();
+$('#review-color').innerHTML = colorOptions();
 const reviewer = createReviewer({
   api,
   formatSize: bytes,
@@ -1504,14 +1793,6 @@ async function batchEditor() {
       ]),
       status: Object.entries(STATUS),
       rating: [[0, '未评分'], ...[1, 2, 3, 4, 5].map((rating) => [rating, '★'.repeat(rating)])],
-      color: [
-        ['none', '无色标'],
-        ['red', '红色'],
-        ['yellow', '黄色'],
-        ['green', '绿色'],
-        ['blue', '蓝色'],
-        ['purple', '紫色'],
-      ],
       rejected: [
         ['0', '保留'],
         ['1', '淘汰'],
@@ -1596,6 +1877,8 @@ async function batchEditor() {
     } else if (key === 'notes') {
       valueBox.innerHTML =
         '<label>照片备注<textarea name="value" rows="4" required></textarea></label>';
+    } else if (key === 'color') {
+      valueBox.innerHTML = `<label>${fields[key]}<select name="value" class="photo-color-select" required>${colorOptions('', { mode: 'batch' })}</select></label>`;
     } else if (Object.hasOwn(options, key)) {
       const list = options[key];
       valueBox.innerHTML = `<label>${fields[key]}${select('value', [['', '请选择'], ...list], '', 'required')}</label>`;
@@ -1641,36 +1924,85 @@ async function trashSelected(restore = false) {
     'RECOVERABLE ARCHIVE',
   );
 }
+const rollFormats = [
+  '135',
+  '120 · 6×4.5',
+  '120 · 6×6',
+  '120 · 6×7',
+  '120 · 6×9',
+  '120 · 6×12',
+  '120 · 6×17',
+];
+const stockFormat = (format) => (format.startsWith('120') ? '120' : '135');
+const stockName = (id) => (STOCKS[id] ? STOCKS[id].brand + ' ' + STOCKS[id].name : id);
+function stockPickerFields(format, stock = 'portra400') {
+  return `<label class="wide">搜索胶片<input id="stock-search" placeholder="搜索型号、厂牌、ISO…"></label><input name="stock" type="hidden" value="${E(stock)}"><div class="wide stock-filters"><label>规格${select(
+    'stockFormat',
+    [
+      ['all', '全部规格'],
+      ['135', '135'],
+      ['120', '120'],
+    ],
+    stockFormat(format),
+    'id="stock-format-filter"',
+  )}</label><label>类型${select(
+    'stockType',
+    [
+      ['all', 'BW + Color'],
+      ['bw', 'BW · 黑白'],
+      ['color', 'Color · 彩色'],
+    ],
+    'all',
+    'id="stock-type-filter"',
+  )}</label><label>厂牌${select('stockBrand', [['all', '全部厂牌'], ...[...new Set(Object.values(STOCKS).map((s) => s.brand))].sort().map((v) => [v, v])], 'all', 'id="stock-brand-filter"')}</label><button type="button" class="soft" data-action="custom-stock">＋ 添加未收录胶片</button></div><p id="stock-count" class="wide"></p><div class="wide stock-picker" id="stock-picker"></div>`;
+}
+function bindStockPicker(form) {
+  const { format, stockFormat: filter } = form.elements;
+  const search = form.querySelector('#stock-search');
+  search.oninput = () => renderStocks(search.value);
+  search.onkeydown = (event) => {
+    if (event.key === 'Enter') event.preventDefault();
+  };
+  filter.onchange = () => {
+    if (format && filter.value === '135') format.value = '135';
+    if (format && filter.value === '120' && !format.value.startsWith('120'))
+      format.value = '120 · 6×6';
+    renderStocks(search.value);
+  };
+  for (const name of ['stockType', 'stockBrand'])
+    form.elements[name].onchange = () => renderStocks(search.value);
+  if (format)
+    format.onchange = () => {
+      filter.value = stockFormat(format.value);
+      renderStocks(search.value);
+    };
+  renderStocks(search.value);
+}
+function editRollStock(roll) {
+  modal(
+    '更换胶片型号',
+    `<div class="form-grid roll-stock-editor"><p class="form-note wide"><b>${E(roll.name)}</b> · ${E(roll.code)} · ${E(roll.format)}</p>${stockPickerFields(roll.format || '135', roll.stock || '')}</div>`,
+    async (form) => {
+      const stock = form.elements.stock.value;
+      if (!stock || stock === roll.stock) return;
+      await patchRecord('rolls', roll.id, { stock });
+      await bootstrap();
+      await refresh();
+    },
+    '保存胶片',
+  );
+  bindStockPicker($('#editor-form'));
+  $('#stock-search').focus();
+}
 function newRoll() {
-  const presets = STATE.boot.lists.presets || [],
-    defaults = presets[0]?.metadata || {};
+  const presets = STATE.boot.lists.presets || [];
   modal(
     '装一卷新胶片',
-    `<div class="form-grid new-roll-form"><label>胶卷模板${select('rollPreset', [['', '手动设置'], ...presets.map((preset) => [preset.id, preset.name])], '')}</label>${field('name', '胶卷名称', '新胶卷', 'text', 'required maxlength="80" autofocus')}<label>画幅${select(
+    `<div class="form-grid new-roll-form"><p class="form-note wide">先建立胶卷档案。扫描完成后，打开整卷再装入影像。</p><label>胶卷模板${select('rollPreset', [['', '手动设置'], ...presets.map((preset) => [preset.id, preset.name])], '')}</label>${field('name', '胶卷名称', '新胶卷', 'text', 'required maxlength="80" autofocus')}<label>画幅${select(
       'format',
-      ['135', '120 · 6×4.5', '120 · 6×6', '120 · 6×7', '120 · 6×9', '120 · 6×12', '120 · 6×17'].map(
-        (v) => [v, v],
-      ),
-      defaults.format || '135',
-    )}</label>${field('camera', '相机', defaults.camera || '')}${dateFields()}<section class="wide roll-location-editor" data-new-roll-location>${locationPickerFields('location', {}, { split: true })}</section><label class="wide">搜索胶片<input id="stock-search" placeholder="搜索型号、厂牌、ISO…"></label><input name="stock" type="hidden" value="portra400"><div class="wide stock-filters"><label>规格${select(
-      'stockFormat',
-      [
-        ['all', '全部规格'],
-        ['135', '135'],
-        ['120', '120'],
-      ],
-      String(defaults.format || '135').startsWith('120') ? '120' : '135',
-      'id="stock-format-filter"',
-    )}</label><label>类型${select(
-      'stockType',
-      [
-        ['all', 'BW + Color'],
-        ['bw', 'BW · 黑白'],
-        ['color', 'Color · 彩色'],
-      ],
-      'all',
-      'id="stock-type-filter"',
-    )}</label><label>厂牌${select('stockBrand', [['all', '全部厂牌'], ...[...new Set(Object.values(STOCKS).map((s) => s.brand))].sort().map((v) => [v, v])], 'all', 'id="stock-brand-filter"')}</label><button type="button" class="soft" data-action="custom-stock">＋ 添加未收录胶片</button></div><p id="stock-count" class="wide"></p><div class="wide stock-picker" id="stock-picker"></div></div>`,
+      rollFormats.map((v) => [v, v]),
+      '135',
+    )}</label>${equipmentField('camera')}${dateFields()}<section class="wide roll-location-editor" data-new-roll-location>${locationPickerFields('location', {}, { split: true })}</section>${stockPickerFields('135')}</div>`,
     async (form) => {
       const v = formValues(form),
         row = await api('/rolls', {
@@ -1701,26 +2033,18 @@ function newRoll() {
     for (const key of ['camera', 'format', 'stock']) {
       if (preset.metadata[key]) form.elements[key].value = preset.metadata[key];
     }
+    if (preset.metadata.date)
+      form.querySelector('.date-fields').outerHTML = dateFields(
+        preset.metadata.date,
+        preset.metadata.datePrecision,
+      );
     disposeLocation();
     locationHost.innerHTML = locationPickerFields('location', preset.metadata, { split: true });
     disposeLocation = mountLocationPicker(locationHost, { api, preferences: mapPreferences });
-    form.querySelector('[name=format]').dispatchEvent(new Event('change'));
-    renderStocks('');
+    form.elements.format.dispatchEvent(new Event('change'));
   };
-  renderStocks('');
-  $('#stock-search').oninput = (e) => renderStocks(e.target.value);
-  for (const id of ['#stock-format-filter', '#stock-type-filter', '#stock-brand-filter'])
-    $(id).onchange = () => {
-      const format = $('#stock-format-filter').value,
-        field = $('#editor-form [name=format]');
-      if (format === '135') field.value = '135';
-      if (format === '120' && !field.value.startsWith('120')) field.value = '120 · 6×6';
-      renderStocks($('#stock-search').value);
-    };
-  $('#editor-form [name=format]').onchange = (e) => {
-    $('#stock-format-filter').value = e.target.value.startsWith('120') ? '120' : '135';
-    renderStocks($('#stock-search').value);
-  };
+  bindStockPicker($('#editor-form'));
+  bindEquipmentFields($('#editor-form'));
 }
 function renderStocks(query) {
   const chosen = $('#editor-form [name="stock"]').value,
@@ -1731,15 +2055,16 @@ function renderStocks(query) {
       brand: $('#stock-brand-filter')?.value || 'all',
     });
   $('#stock-count').textContent =
-    `${results.length} 个型号 · 当前选择 ${STOCKS[chosen]?.brand || ''} ${STOCKS[chosen]?.name || chosen} · 含历史型号，非在售清单`;
+    `${results.length} 个型号 · 当前选择 ${stockName(chosen)} · 含历史型号，非在售清单`;
+  const summary = $('#editor-form [data-import-stock-name]');
+  if (summary) summary.textContent = stockName(chosen);
   $('#stock-picker').innerHTML =
     results
       .map(
         ([id, s]) =>
-          `<button type="button" class="stock-choice ${chosen === id ? 'active' : ''}" data-action="choose-stock" data-value="${id}" style="--stock:${s.color2}"><b>${E(s.name)}</b><small>${E(s.brand)} · ISO ${E(s.iso)} · ${s.group === 'bw' ? 'BW' : 'Color'} · ${E(s.formats.join(' / '))}</small></button>`,
+          `<button type="button" class="stock-choice ${chosen === id ? 'active' : ''}" data-action="choose-stock" data-value="${E(id)}" aria-pressed="${chosen === id}" style="--stock:${E(s.color2)}"><b>${E(s.name)}</b><small>${E(s.brand)} · ISO ${E(s.iso)} · ${s.group === 'bw' ? 'BW' : 'Color'} · ${E(s.formats.join(' / '))}</small></button>`,
       )
       .join('') || '<p class="muted">没有匹配型号。可清除筛选，或添加自己的胶片。</p>';
-  requestAnimationFrame(() => $('#stock-picker .active')?.scrollIntoView({ block: 'nearest' }));
 }
 function customStock() {
   const dialog = document.createElement('dialog');
@@ -2017,180 +2342,303 @@ async function renderAtlas() {
     assignId,
   });
 }
-function chooseImport(targetRoll = null, targetPhoto = null) {
-  STATE.importTargetRoll = targetRoll;
-  STATE.importTargetPhoto = targetPhoto;
+const importPath = (file) => file.webkitRelativePath || file.name;
+const importFolder = (file) => importPath(file).split('/').slice(0, -1).join('/');
+const versionKinds = [
+  ['scan', '扫描原版'],
+  ['rescan', '重扫'],
+  ['edit', '调色版本'],
+  ['export', '导出副本'],
+];
+
+async function chooseImport({ rollId, photoId, lockRoll = false, initialFiles = [] } = {}) {
+  const target = photoId
+    ? STATE.entities.get(photoId) || (await api('/photos/' + encodeURIComponent(photoId)))
+    : rollId
+      ? (await api('/rolls?filter=' + encodeURIComponent(JSON.stringify({ id: rollId, limit: 1 }))))
+          .items[0]
+      : null;
+  if (rollId && !target) throw new Error('找不到要导入的胶卷');
   STATE.resumeUploadId = null;
-  STATE.importFiles = [];
-  showImportWizard();
+  showImportWizard({ target, photoId, lockRoll, initialFiles });
 }
-function showImportWizard() {
-  const presets = STATE.boot.lists.presets || [],
-    pathOf = (file) => file.webkitRelativePath || file.name,
-    files = [...STATE.importFiles].sort((a, b) =>
-      pathOf(a).localeCompare(pathOf(b), undefined, { numeric: true }),
-    ),
-    plans = new Map(),
-    duplicateChecks = new Map(),
-    groups = new Set(
-      files.map(
-        (file) =>
-          (file.webkitRelativePath || file.name).split('/').slice(0, -1).join('/') || '未分组',
-      ),
-    );
+
+function importThumbnail(mediaId, fallback) {
+  return `<span class="import-target-thumb">${mediaId ? `<img src="${thumb(mediaId, 320)}" alt="" loading="lazy" decoding="async">` : E(fallback)}</span>`;
+}
+
+function importTargetCard(record, isPhoto) {
+  const name = record.name || '未命名';
+  const mediaId = isPhoto ? record.mediaId : record.coverMedia;
+  const info = isPhoto
+    ? [
+        record.rollName,
+        record.rollCode,
+        record.frameNo && '第 ' + record.frameNo + ' 格',
+        (record.versions?.length || record.versionCount || 1) + ' 个版本',
+      ]
+    : [record.code, record.format, stockName(record.stock), record.camera];
+  const thumbnail = record.mime?.startsWith('video/') ? null : mediaId;
+  return `<div class="import-target-card">${importThumbnail(thumbnail, !isPhoto && record.frameCount === 0 ? '空卷' : '无预览')}<div><strong>${E(name)}</strong><small>${E(info.filter(Boolean).join(' · '))}</small></div></div>`;
+}
+
+function showImportWizard({ target, photoId, lockRoll, initialFiles }) {
+  const presets = STATE.boot.lists.presets || [];
+  const destinationModes = [
+    ['single', '新建一卷', '所有文件归入同一个新胶卷'],
+    ['folders', '按文件夹建卷', '每个直接存放影像的文件夹建立一卷'],
+    ['existing', '装入已有卷', '选择档案里的胶卷'],
+  ];
+  const isVersion = Boolean(photoId);
+  let mode = target && !isVersion ? 'existing' : 'single';
+  let roll = mode === 'existing' ? target : null;
+  let files = [],
+    existingFrames = [],
+    framesLoading = false,
+    framesError = '';
+  let frameRequest = 0,
+    rollSearchRequest = 0,
+    planPage = 0,
+    searchPage = 0,
+    searchPages = 0;
+  let checkingDuplicates = false,
+    searchTimer,
+    disposeImportLocation,
+    submitting = false;
+  const plans = new Map(),
+    duplicateChecks = new Map();
+  const dedupChoices = [
+    ['skip', '跳过内容相同的文件'],
+    ['reuse', isVersion ? '复用文件，加入版本' : '复用文件，建立底片或版本记录'],
+    ['keep', '导入为独立副本'],
+  ];
   modal(
-    STATE.importTargetPhoto ? '加入新的扫描版本' : '批量装入影像',
-    `<div class="import-drop"><div>${!STATE.importTargetRoll && !STATE.importTargetPhoto ? '<button type="button" class="soft" data-action="new-storage">引用外置盘目录</button>' : ''}<button type="button" class="soft" data-action="pick-files">选择文件</button><button type="button" class="soft" data-action="pick-folder">选择文件夹</button></div><p>${files.length ? files.length.toLocaleString() + ' 个文件 · ' + bytes(files.reduce((n, f) => n + f.size, 0)) + ' · ' + groups.size + ' 个来源文件夹' : '这些照片会复制到资料库；外置盘原片不想复制时，请使用“引用外置盘目录”'}</p></div><div data-import-plan></div>${files.length ? '<p class="form-note">重扫归入已有格号。文件内容重复按下方规则在上传时核对。</p>' : ''}<div class="form-grid"><label>导入模板${select('preset', [['', '手动填写'], ...presets.map((p) => [p.id, p.name])], '', 'id="import-preset"')}</label><label>重复文件${select(
-      'dedup',
-      [
-        ['skip', '跳过哈希完全相同的文件'],
-        ['reuse', '复用原片，创建新的底片记录'],
-        ['keep', '保留独立副本'],
-      ],
-      'skip',
-    )}</label>${
-      STATE.importTargetRoll || STATE.importTargetPhoto
-        ? '<p class="form-note wide">影像将加入已选胶卷 / 底片，不会新建其他胶卷。</p>'
-        : `<label>分卷方式${select(
-            'groupMode',
-            [
-              ['folders', '按来源文件夹分卷'],
-              ['single', '全部装入一卷'],
-            ],
-            'folders',
-          )}</label>${field('name', '单卷名称', '导入胶卷')}`
-    }<label>边码编号${select(
-      'numbering',
-      [
-        ['sequential', '按装入顺序编号'],
-        ['filename', '从文件名末尾提取（如 frame-03A）'],
-      ],
-      'sequential',
-    )}</label><label>胶片${select(
-      'stock',
-      Object.entries(STOCKS).map(([id, s]) => [id, s.brand + ' ' + s.name]),
-      'portra400',
-    )}</label><label>画幅${select(
-      'format',
-      ['135', '120 · 6×4.5', '120 · 6×6', '120 · 6×7', '120 · 6×9'].map((v) => [v, v]),
-      '135',
-    )}</label>${field('camera', '相机', '')}${field('lens', '镜头', '')}${STATE.importTargetRoll || STATE.importTargetPhoto ? '' : `<details class="wide roll-location-editor" data-import-location><summary>设置胶卷地点</summary><div data-import-location-fields>${locationPickerFields('location')}</div></details>`}${dateFields()}${field('project', '拍摄项目', '')}<label class="wide"><input name="useFileDate" type="checkbox"> 文件 EXIF 日期是实际拍摄日期</label><label>扫描版本类型${select(
-      'kind',
-      [
-        ['scan', '扫描原版'],
-        ['rescan', '重扫'],
-        ['edit', '调色版本'],
-        ['export', '导出副本'],
-      ],
-      'scan',
-    )}</label>${field('presetName', '可选：将本次档案设置保存为模板', '')}</div>`,
-    async (form) => {
-      if (!STATE.importFiles.length) throw new Error('请先选择照片或视频');
-      const v = formValues(form),
-        numbers = proposedFrames(),
-        presetMetadata = presets.find((preset) => preset.id === v.preset)?.metadata || {},
-        metadata = Object.fromEntries(
-          [
-            'name',
-            'stock',
+    isVersion ? '加入扫描版本' : lockRoll ? '装入扫描' : '导入影像',
+    `<div class="import-wizard${isVersion ? ' import-version-wizard' : ''}">
+      <section class="import-section import-destination">
+        <h3>${isVersion ? '目标底片' : '归档到哪里'}</h3>
+        ${
+          isVersion || lockRoll
+            ? importTargetCard(target, isVersion)
+            : `<div class="import-modes" role="group" aria-label="导入目标">${destinationModes.map(([id, label, description]) => `<label><input type="radio" name="destination" value="${id}" ${id === mode ? 'checked' : ''}><span><b>${label}</b><small>${description}</small></span></label>`).join('')}</div>
+        <div class="import-roll-picker" data-import-roll-picker hidden>
+          <div data-import-picked-roll></div>
+          <div data-import-roll-search>
+            ${field('rollSearch', '查找胶卷', '', 'search', 'placeholder="按卷名、永久编号或相机查找" autocomplete="off"')}
+            <div class="import-roll-results" data-import-roll-results aria-live="polite"></div>
+            <div class="import-paging" data-import-roll-paging hidden><button type="button" class="soft" data-import-roll-page="-1">上一页</button><span></span><button type="button" class="soft" data-import-roll-page="1">下一页</button></div>
+          </div>
+        </div>`
+        }
+        <p class="import-help">${isVersion ? '选中的文件会成为这一格底片的额外版本。当前主版本继续用于默认预览。' : lockRoll ? '沿用此卷档案。在导入预演中可以新增底片，也可以把文件配到已有格号作为重扫。' : '手上已有扫描文件，可以在这里直接建卷并归档。只想先记下胶片和相机时，用「新建胶卷」建立空档案。'}</p>
+      </section>
+      <section class="import-section">
+        <h3>${isVersion ? '版本文件' : '来源文件'}</h3>
+        <div class="import-drop" data-import-drop><div><button type="button" class="soft" data-action="pick-files">选择文件</button><button type="button" class="soft" data-action="pick-folder">选择文件夹</button></div><p data-import-source role="status">也可以把文件或文件夹拖到这里</p></div>
+        ${!isVersion && !lockRoll ? '<p class="import-help">导入会复制文件到资料库。原片已经存放在外置盘时，可以<button type="button" class="text" data-action="new-storage">引用外置盘目录</button>。</p>' : ''}
+      </section>
+      ${isVersion ? `<section class="import-section form-grid"><label class="wide">扫描版本类型${select('kind', versionKinds, 'rescan')}</label></section>` : ''}
+      ${
+        !isVersion && !lockRoll
+          ? `<fieldset class="import-new-roll import-section" data-import-new-roll>
+        <legend>新卷档案</legend>
+        <div class="form-grid import-fields">
+          ${field('name', '胶卷名称', '导入胶卷', 'text', 'maxlength="80"')}
+          <label>画幅${select(
             'format',
-            'camera',
-            'lens',
-            'location',
-            'date',
-            'datePrecision',
-            'project',
-          ].map((k) => [k, v[k] || '']),
-        );
-      for (const key of ['exposureIndex', 'processType', 'lab', 'process']) {
-        if (presetMetadata[key] !== undefined) metadata[key] = presetMetadata[key];
+            rollFormats.map((v) => [v, v]),
+            '135',
+          )}</label>
+          <details class="wide import-detail"><summary><span>胶片型号</span><b data-import-stock-name></b></summary><div class="form-grid import-stock-fields">${stockPickerFields('135')}</div></details>
+          <details class="wide import-detail"><summary>更多胶卷档案与模板</summary><div class="form-grid import-fields">
+            <label class="wide">套用胶卷模板${select('preset', [['', presets.length ? '不使用模板' : '暂无已保存的胶卷模板'], ...presets.map((p) => [p.id, p.name])], '', presets.length ? '' : 'disabled')}</label>
+            <p class="wide import-help">模板可预填常用的胶片、画幅、相机等资料。在「新建胶卷」也可以使用同一份模板。</p>
+            ${equipmentField('camera')}${equipmentField('lens')}${dateFields()}${field('project', '拍摄项目')}
+            <details class="wide roll-location-editor import-detail" data-import-location><summary>设置胶卷地点</summary><div data-import-location-fields>${locationPickerFields('location')}</div></details>
+            ${field('presetName', '保存为胶卷模板（可选）', '', 'text', 'maxlength="80"')}
+          </div></details>
+        </div>
+      </fieldset>`
+          : ''
       }
-      if (!STATE.importTargetRoll && !STATE.importTargetPhoto)
+      ${
+        isVersion
+          ? ''
+          : `<section class="import-section import-numbering"><label>格号编号${select(
+              'numbering',
+              [
+                ['sequential', '按装入顺序编号'],
+                ['filename', '从文件名末尾提取（如 frame-03A）'],
+              ],
+              'sequential',
+            )}</label><p class="import-help">可以在导入预演里逐个修改格号。</p></section>`
+      }
+      <section data-import-plan></section>
+      <details class="import-detail import-section"><summary>高级导入选项</summary><div class="form-grid import-fields">
+        <label${isVersion ? ' class="wide"' : ''}>重复文件${select('dedup', dedupChoices, 'skip')}</label>
+        ${isVersion ? '' : `<label>新底片的扫描版本类型${select('kind', versionKinds, 'scan')}</label><label class="wide import-checkbox"><input name="useFileDate" type="checkbox"> 将文件的 EXIF 日期用于拍摄日期</label><p class="wide import-help">只有文件记录的确实是拍摄日期时才开启。扫描仪写入的时间通常是扫描日期。</p>`}
+      </div></details>
+    </div>`,
+    async (form) => {
+      if (
+        !files.length ||
+        (!isVersion && mode === 'existing' && (!roll || framesLoading || framesError))
+      )
+        throw new Error('请先确认来源文件和归档目标');
+      const v = formValues(form);
+      const newRoll = !isVersion && mode !== 'existing';
+      const metadata = {};
+      if (newRoll) {
+        for (const key of [
+          'name',
+          'stock',
+          'format',
+          'camera',
+          'lens',
+          'date',
+          'datePrecision',
+          'project',
+        ])
+          metadata[key] = v[key]?.trim() || '';
         Object.assign(metadata, rollLocationPatch(v));
-      if (v.presetName.trim())
-        await api('/presets', { method: 'POST', body: { name: v.presetName.trim(), metadata } });
-      const record = await api('/imports', {
-        method: 'POST',
-        body: {
-          name: STATE.importTargetPhoto
-            ? '加入扫描版本'
-            : '批量导入 ' + STATE.importFiles.length + ' 个文件',
-          files: files.map((file) => ({
-            path: pathOf(file),
-            ...plans.get(file),
-            frameNo: numbers.get(file),
-            size: file.size,
-            mtime: file.lastModified,
-          })),
-          metadata,
-          useFileDate: v.useFileDate === 'on',
-          dedup: v.dedup,
-          groupMode: v.groupMode,
-          numbering: v.numbering,
-          targetRoll: STATE.importTargetRoll,
-          targetPhoto: STATE.importTargetPhoto,
-          kind: v.kind,
-        },
-      });
-      STATE.uploadSources.set(record.id, STATE.importFiles);
-      $('#task-drawer').hidden = false;
-      uploadBatch(record.id).catch((error) => toast(error.message, 'warning'));
+        const template = presets.find((preset) => preset.id === v.preset)?.metadata || {};
+        for (const key of ['exposureIndex', 'processType', 'lab', 'process'])
+          if (template[key] !== undefined) metadata[key] = template[key];
+      }
+      const numbers = proposedFrames();
+      submitting = true;
+      try {
+        const record = await api('/imports', {
+          method: 'POST',
+          body: {
+            name: isVersion
+              ? '加入扫描版本 · ' + target.name
+              : '导入影像 · ' + files.length + ' 个文件',
+            files: files.map((file) => ({
+              path: importPath(file),
+              targetPhoto: !newRoll && !isVersion ? plans.get(file)?.targetPhoto : undefined,
+              frameNo: numbers.get(file),
+              size: file.size,
+              mtime: file.lastModified,
+            })),
+            metadata,
+            useFileDate: !isVersion && v.useFileDate === 'on',
+            dedup: v.dedup,
+            groupMode: mode === 'folders' ? 'folders' : 'single',
+            numbering: isVersion ? 'sequential' : v.numbering,
+            targetRoll: mode === 'existing' ? roll.id : undefined,
+            targetPhoto: photoId,
+            kind: v.kind,
+          },
+        });
+        STATE.uploadSources.set(record.id, files);
+        if (newRoll && v.presetName?.trim()) {
+          try {
+            await api('/presets', {
+              method: 'POST',
+              body: { name: v.presetName.trim(), metadata },
+            });
+          } catch (error) {
+            toast('胶卷模板未保存：' + error.message, 'warning');
+          }
+        }
+        $('#task-drawer').hidden = false;
+        uploadBatch(record.id).catch((error) => toast(error.message, 'warning'));
+      } finally {
+        submitting = false;
+      }
     },
-    '开始导入',
-    'IMPORT DESK',
+    isVersion ? '加入版本' : '开始导入',
+    isVersion ? 'SCAN VERSIONS' : 'IMPORT',
   );
   const form = $('#editor-form'),
-    planHost = form.querySelector('[data-import-plan]'),
-    rollId = STATE.importTargetRoll,
-    targetPhoto = STATE.importTargetPhoto;
-  let existingFrames = [],
-    planPage = 0,
-    checkingDuplicates = false;
+    wizard = form.querySelector('.import-wizard');
+  const planHost = wizard.querySelector('[data-import-plan]');
+  const newRollFields = wizard.querySelector('[data-import-new-roll]');
+  const rollPicker = wizard.querySelector('[data-import-roll-picker]');
+  const importLocation = wizard.querySelector('[data-import-location]');
+  const submitButton = $('#editor-footer button[type="submit"]');
+  const footerStatus = document.createElement('span');
+  footerStatus.className = 'import-footer-status';
+  footerStatus.setAttribute('role', 'status');
+  $('#editor-footer').prepend(footerStatus);
+  const active = () => wizard.isConnected && $('#editor').open;
+
   function proposedFrames() {
-    const totals = new Map(),
-      initial = rollId ? Math.max(-1, ...existingFrames.map((photo) => photo.position)) + 1 : 0;
+    const totals = new Map();
+    const initial = existingFrames.length ? existingFrames.at(-1).position + 1 : 0;
     return new Map(
       files.map((file) => {
         const plan = plans.get(file);
-        if (targetPhoto || plan?.targetPhoto) return [file, ''];
-        const folder =
-          form.elements.groupMode?.value === 'folders'
-            ? pathOf(file).split('/').slice(0, -1).join('/')
-            : '';
-        const order = (totals.get(folder) || initial) + 1;
+        if (isVersion || plan?.targetPhoto) return [file, ''];
+        const folder = mode === 'folders' ? importFolder(file) : '';
+        const order = (totals.get(folder) ?? initial) + 1;
         totals.set(folder, order);
-        const detected =
+        const fromName =
           form.elements.numbering.value === 'filename'
             ? file.name.match(/(?:^|[ _-])(\d{1,3}[a-z]?)(?=\.[^.]+$)/i)?.[1]
             : '';
-        return [file, plan?.frameNo || detected || String(order).padStart(2, '0')];
+        return [file, plan?.frameNo || fromName || String(order).padStart(2, '0')];
       }),
     );
   }
+
   function renderPlan() {
-    const start = planPage * 40,
-      groupMode = form.elements.groupMode?.value,
-      rollName = STATE.entities.get(rollId)?.name || '当前胶卷',
-      numbers = proposedFrames();
-    planHost.innerHTML = files.length
-      ? `<div class="import-plan-head"><b>导入预演</b><button type="button" data-plan-page="-1" ${planPage ? '' : 'disabled'}>‹ 上页</button><span>${planPage + 1} / ${Math.ceil(files.length / 40)}</span><button type="button" data-plan-page="1" ${start + 40 < files.length ? '' : 'disabled'}>下页 ›</button><button type="button" class="soft" data-check-duplicates ${checkingDuplicates ? 'disabled' : ''}>${checkingDuplicates ? '核对中…' : '核对本页重复文件'}</button></div><div class="import-plan">${files
-          .slice(start, start + 40)
-          .map((file, i) => {
-            const index = start + i,
-              plan = plans.get(file) || {},
-              path = pathOf(file),
-              folder = path.split('/').slice(0, -1).at(-1),
-              group = targetPhoto
-                ? '当前底片的扫描版本'
-                : rollId
-                  ? rollName
-                  : groupMode === 'folders' && folder
-                    ? folder
-                    : form.elements.name?.value || '导入胶卷';
-            return `<div class="import-plan-row" data-plan-index="${index}"><div><b>${E(file.name)}</b><small>${E(group)}</small>${duplicateChecks.has(file) ? `<small>${duplicateChecks.get(file) ? '内容重复' : '未发现相同内容'}</small>` : ''}</div>${targetPhoto ? '' : `<label>格号<input data-plan-frame aria-label="格号" maxlength="24" value="${E(plan.frameNo || '')}" placeholder="${E(numbers.get(file))}" ${plan.targetPhoto ? 'disabled' : ''}></label>${rollId ? `<label>导入方式${select('planTarget', [['', '新底片'], ...existingFrames.map((photo) => [photo.id, '重扫 · ' + photo.frameNo + ' · ' + photo.name])], plan.targetPhoto)}</label>` : ''}`}<div class="import-plan-order"><button type="button" data-plan-move="-1" aria-label="上移" ${index ? '' : 'disabled'}>↑</button><button type="button" data-plan-move="1" aria-label="下移" ${index < files.length - 1 ? '' : 'disabled'}>↓</button></div></div>`;
-          })
-          .join('')}</div>`
-      : '';
+    const needsRoll = mode === 'existing' && !roll;
+    if (!submitting)
+      submitButton.disabled = !files.length || needsRoll || framesLoading || Boolean(framesError);
+    const folderCount = mode === 'folders' ? new Set(files.map(importFolder)).size : 0;
+    let destinationLabel = '新建一卷';
+    if (isVersion) destinationLabel = '加入当前底片';
+    else if (mode === 'existing') destinationLabel = roll?.name;
+    else if (mode === 'folders') destinationLabel = `新建 ${folderCount} 卷`;
+    footerStatus.textContent = !files.length
+      ? '请选择来源文件'
+      : needsRoll
+        ? '请选择目标胶卷'
+        : `${files.length.toLocaleString()} 个文件 · ${destinationLabel}`;
+    if (!files.length) {
+      planHost.replaceChildren();
+      return;
+    }
+    const start = planPage * 40;
+    const numbers = proposedFrames();
+    const newRollName = form.elements.name?.value.trim() || '导入胶卷';
+    const summary = isVersion
+      ? `向「${target.name}」加入 ${files.length} 个待核对的版本文件`
+      : mode === 'existing'
+        ? roll
+          ? '目标胶卷：' + roll.name
+          : '选择目标胶卷后可分配格号'
+        : mode === 'folders'
+          ? `按来源分为 ${folderCount} 卷，将在导入时建立档案`
+          : `全部文件归入新卷「${newRollName}」`;
+    const frameStatus = framesLoading
+      ? '<p class="import-help" role="status">正在读取胶卷格号…</p>'
+      : framesError
+        ? `<p class="import-help" role="alert">${E(framesError)} <button type="button" class="soft" data-retry-import-frames>重试</button></p>`
+        : '';
+    const canAssign =
+      !isVersion && (mode !== 'existing' || (roll && !framesLoading && !framesError));
+    const frameOptions = [
+      ['', '新增一格'],
+      ...existingFrames.map((p) => [p.id, '重扫 · ' + p.frameNo + ' · ' + p.name]),
+    ];
+    planHost.innerHTML = `<div class="import-plan-head"><h3>${isVersion ? '待加入的文件' : '导入预演'}</h3>${isVersion ? '' : `<p class="import-help">${E(summary)}</p>`}</div>${frameStatus}
+      <div class="import-plan-tools"><div class="import-paging" ${files.length <= 40 ? 'hidden' : ''}><button type="button" class="soft" data-plan-page="-1" ${planPage ? '' : 'disabled'}>上一页</button><span>${planPage + 1} / ${Math.ceil(files.length / 40)}</span><button type="button" class="soft" data-plan-page="1" ${start + 40 < files.length ? '' : 'disabled'}>下一页</button></div><button type="button" class="soft" data-check-duplicates ${checkingDuplicates ? 'disabled' : ''}>${checkingDuplicates ? '正在核对…' : '核对本页重复文件'}</button></div>
+      <div class="import-plan">${files
+        .slice(start, start + 40)
+        .map((file, i) => {
+          const index = start + i,
+            plan = plans.get(file) || {};
+          const folder = importFolder(file).split('/').at(-1);
+          const destination = mode === 'folders' ? folder || newRollName : '';
+          return `<div class="import-plan-row" data-plan-index="${index}"><div><b title="${E(importPath(file))}">${E(file.name)}</b><small>${E([destination, bytes(file.size)].filter(Boolean).join(' · '))}</small>${duplicateChecks.has(file) ? `<small>${duplicateChecks.get(file) ? '内容重复' : '未发现相同内容'}</small>` : ''}</div>
+          ${canAssign ? `<label>格号<input data-plan-frame maxlength="24" value="${E(plan.frameNo || '')}" placeholder="${E(numbers.get(file))}" ${plan.targetPhoto ? 'disabled' : ''}></label>${existingFrames.length ? `<label>对应底片${select('planTarget', frameOptions, plan.targetPhoto)}</label>` : ''}` : ''}
+          ${files.length > 1 ? `<div class="import-plan-order"><button type="button" class="soft" data-plan-move="-1" aria-label="上移 ${E(file.name)}" ${index ? '' : 'disabled'}>↑</button><button type="button" class="soft" data-plan-move="1" aria-label="下移 ${E(file.name)}" ${index < files.length - 1 ? '' : 'disabled'}>↓</button></div>` : ''}
+        </div>`;
+        })
+        .join('')}</div>`;
   }
   planHost.oninput = (event) => {
     if (!event.target.hasAttribute('data-plan-frame')) return;
@@ -2205,6 +2653,10 @@ function showImportWizard() {
     renderPlan();
   };
   planHost.onclick = async (event) => {
+    if (event.target.closest('[data-retry-import-frames]')) {
+      loadFrames();
+      return;
+    }
     if (event.target.closest('[data-check-duplicates]')) {
       if (checkingDuplicates) return;
       checkingDuplicates = true;
@@ -2226,14 +2678,15 @@ function showImportWizard() {
         });
         const counts = new Map();
         for (const { hash } of checks) counts.set(hash, (counts.get(hash) || 0) + 1);
-        pageFiles.forEach((file, i) =>
-          duplicateChecks.set(file, matches[i] || counts.get(checks[i].hash) > 1),
-        );
+        pageFiles.forEach((file, i) => {
+          if (files.includes(file))
+            duplicateChecks.set(file, matches[i] || counts.get(checks[i].hash) > 1);
+        });
       } catch (error) {
         if (planHost.isConnected && $('#editor').open) toast(error.message, 'warning');
       } finally {
         checkingDuplicates = false;
-        if (planHost.isConnected && $('#editor').open) renderPlan();
+        if (active()) renderPlan();
       }
       return;
     }
@@ -2248,63 +2701,199 @@ function showImportWizard() {
     }
     if (paging || moving) renderPlan();
   };
-  for (const name of ['groupMode', 'numbering', 'name']) {
-    if (form.elements[name]) form.elements[name].onchange = renderPlan;
+  function setFiles(sources) {
+    if (!active() || submitting) return;
+    const valid = sources.filter(
+      (file) =>
+        file.size > 0 &&
+        !file.name.startsWith('.') &&
+        (/^(image|video)\//.test(file.type) ||
+          /\.(jpe?g|png|tiff?|webp|heic|heif|avif|gif|svg|dng|nef|arw|cr[23]|raf|mp4|mov|m4v)$/i.test(
+            file.name,
+          )),
+    );
+    if (!valid.length) {
+      if (sources.length) toast('没有可导入的影像文件', 'warning');
+      return;
+    }
+    if (valid.length > 10000 || valid.some((file) => file.size > 1024 ** 3)) {
+      toast('每批最多 10,000 个文件，每个文件最多 1 GB', 'warning');
+      return;
+    }
+    if (new Set(valid.map(importPath)).size !== valid.length) {
+      toast('同批来源路径重复，请分批导入', 'warning');
+      return;
+    }
+    files = valid.sort((a, b) =>
+      importPath(a).localeCompare(importPath(b), undefined, { numeric: true }),
+    );
+    plans.clear();
+    duplicateChecks.clear();
+    planPage = 0;
+    const skipped = sources.length - files.length;
+    wizard.querySelector('[data-import-source]').textContent =
+      `${files.length.toLocaleString()} 个文件 · ${bytes(files.reduce((sum, file) => sum + file.size, 0))}${skipped ? ` · 已略过 ${skipped} 个非影像或空文件` : ''}`;
+    renderPlan();
   }
-  renderPlan();
-  if (rollId && files.length) {
-    api(
-      '/photos?filter=' + encodeURIComponent(JSON.stringify({ rollId, sort: 'frame', limit: 200 })),
-    )
-      .then((result) => {
-        if (!planHost.isConnected) return;
-        existingFrames = result.items;
+
+  async function loadFrames() {
+    const token = ++frameRequest;
+    existingFrames = [];
+    framesError = '';
+    framesLoading = mode === 'existing' && Boolean(roll);
+    renderPlan();
+    if (!framesLoading) return;
+    const rollId = roll.id;
+    try {
+      const frames = [];
+      for (let page = 0; ; page++) {
+        const query = { rollId, sort: 'frame', limit: 200, page };
+        const result = await api('/photos?filter=' + encodeURIComponent(JSON.stringify(query)));
+        if (!active() || token !== frameRequest) return;
+        frames.push(...result.items);
+        if (page + 1 >= result.pages) break;
+      }
+      existingFrames = frames;
+    } catch (error) {
+      if (active() && token === frameRequest) framesError = '读取格号失败：' + error.message;
+    } finally {
+      if (active() && token === frameRequest) {
+        framesLoading = false;
         renderPlan();
-      })
-      .catch((error) => toast(error.message, 'warning'));
+      }
+    }
   }
-  const importLocation = form.querySelector('[data-import-location]');
-  let disposeImportLocation;
-  if (importLocation) {
-    const mountImportLocation = () => {
-      if (importLocation.open && !disposeImportLocation)
-        disposeImportLocation = mountLocationPicker(importLocation, {
-          api,
-          preferences: STATE.boot.lists.settings || {},
-        });
+
+  async function searchRolls() {
+    const token = ++rollSearchRequest;
+    const results = rollPicker.querySelector('[data-import-roll-results]');
+    const paging = rollPicker.querySelector('[data-import-roll-paging]');
+    const query = {
+      query: form.elements.rollSearch.value.trim(),
+      limit: 6,
+      page: searchPage,
+      sort: 'code',
     };
-    importLocation.addEventListener('toggle', mountImportLocation);
-    $('#editor').addEventListener('close', () => disposeImportLocation?.(), { once: true });
+    results.textContent = '正在查找胶卷…';
+    paging.hidden = true;
+    try {
+      const result = await api('/rolls?filter=' + encodeURIComponent(JSON.stringify(query)));
+      if (!active() || token !== rollSearchRequest) return;
+      searchPages = result.pages;
+      results.innerHTML =
+        result.items
+          .map((item) => {
+            STATE.entities.set(item.id, item);
+            return `<button type="button" class="import-roll-result" data-import-choose-roll="${E(item.id)}">${importThumbnail(item.coverMedia, item.frameCount ? '无封面' : '空卷')}<span class="import-roll-result-info"><b>${E(item.name)}</b><small>${E([item.code, item.camera, item.date].filter(Boolean).join(' · '))} · ${item.frameCount} 格</small></span></button>`;
+          })
+          .join('') || '<p class="import-help">没有找到匹配的胶卷。</p>';
+      paging.hidden = searchPages <= 1;
+      paging.querySelector('span').textContent = `${searchPage + 1} / ${searchPages}`;
+      paging.querySelector('[data-import-roll-page="-1"]').disabled = searchPage === 0;
+      paging.querySelector('[data-import-roll-page="1"]').disabled = searchPage + 1 >= searchPages;
+    } catch (error) {
+      if (active() && token === rollSearchRequest) results.textContent = error.message;
+    }
   }
-  const preset = $('#import-preset');
-  if (preset)
-    preset.onchange = (event) => {
-      const p = presets.find((p) => p.id === event.target.value);
-      if (!p) return;
-      const form = $('#editor-form');
-      form.querySelector('.date-fields').outerHTML = dateFields(
-        p.metadata.date,
-        p.metadata.datePrecision,
-      );
-      if (importLocation) {
+
+  function renderDestination() {
+    if (newRollFields) {
+      newRollFields.hidden = newRollFields.disabled = mode === 'existing';
+      form.elements.name.labels[0].firstChild.textContent =
+        mode === 'folders' ? '散装文件的卷名' : '胶卷名称';
+      if (mode === 'existing') {
         disposeImportLocation?.();
         disposeImportLocation = null;
-        importLocation.querySelector('[data-import-location-fields]').innerHTML =
-          locationPickerFields('location', p.metadata);
-        if (p.metadata.location || rollCoordinates(p.metadata)) importLocation.open = true;
-        if (importLocation.open)
-          disposeImportLocation = mountLocationPicker(importLocation, {
-            api,
-            preferences: STATE.boot.lists.settings || {},
-          });
-      }
-      for (const [key, value] of Object.entries(p.metadata))
-        if (
-          !['date', 'datePrecision', 'location', 'latitude', 'longitude'].includes(key) &&
-          form.elements[key]
-        )
-          form.elements[key].value = value;
+      } else mountImportLocation();
+    }
+    if (rollPicker) {
+      rollPicker.hidden = mode !== 'existing';
+      const chosen = rollPicker.querySelector('[data-import-picked-roll]');
+      chosen.innerHTML = roll
+        ? importTargetCard(roll, false) +
+          '<button type="button" class="soft" data-import-change-roll>更换胶卷</button>'
+        : '';
+      rollPicker.querySelector('[data-import-roll-search]').hidden = Boolean(roll);
+      if (mode === 'existing' && !roll) searchRolls();
+    }
+    loadFrames();
+  }
+
+  function mountImportLocation() {
+    if (importLocation?.open && !newRollFields.disabled && !disposeImportLocation)
+      disposeImportLocation = mountLocationPicker(importLocation, {
+        api,
+        preferences: STATE.boot.lists.settings || {},
+      });
+  }
+  if (newRollFields) {
+    bindStockPicker(form);
+    bindEquipmentFields(newRollFields);
+    importLocation.addEventListener('toggle', mountImportLocation);
+    form.elements.preset.onchange = () => {
+      const template = presets.find((p) => p.id === form.elements.preset.value)?.metadata;
+      if (!template) return;
+      for (const key of ['stock', 'format', 'camera', 'lens', 'project'])
+        if (template[key] != null) form.elements[key].value = template[key];
+      if (template.date)
+        form.querySelector('.date-fields').outerHTML = dateFields(
+          template.date,
+          template.datePrecision,
+        );
+      disposeImportLocation?.();
+      disposeImportLocation = null;
+      importLocation.querySelector('[data-import-location-fields]').innerHTML =
+        locationPickerFields('location', template);
+      if (template.location || rollCoordinates(template)) importLocation.open = true;
+      mountImportLocation();
+      form.elements.format.dispatchEvent(new Event('change'));
     };
+    form.elements.name.onchange = renderPlan;
+  }
+  if (form.elements.numbering) form.elements.numbering.onchange = renderPlan;
+  if (rollPicker) {
+    form.elements.rollSearch.oninput = () => {
+      clearTimeout(searchTimer);
+      rollSearchRequest++;
+      searchPage = 0;
+      rollPicker.querySelector('[data-import-roll-results]').textContent = '正在查找胶卷…';
+      rollPicker.querySelector('[data-import-roll-paging]').hidden = true;
+      searchTimer = setTimeout(searchRolls, 180);
+    };
+    form.elements.rollSearch.onkeydown = (event) => {
+      if (event.key === 'Enter') event.preventDefault();
+    };
+    wizard.addEventListener('change', (event) => {
+      if (event.target.name !== 'destination') return;
+      mode = event.target.value;
+      for (const plan of plans.values()) delete plan.targetPhoto;
+      renderDestination();
+    });
+    rollPicker.onclick = (event) => {
+      const choice = event.target.closest('[data-import-choose-roll]');
+      const page = event.target.closest('[data-import-roll-page]');
+      if (choice || event.target.closest('[data-import-change-roll]')) {
+        roll = choice ? STATE.entities.get(choice.dataset.importChooseRoll) : null;
+        for (const plan of plans.values()) delete plan.targetPhoto;
+        renderDestination();
+        rollPicker.querySelector(roll ? '[data-import-change-roll]' : '[name=rollSearch]')?.focus();
+      } else if (page) {
+        searchPage += Number(page.dataset.importRollPage);
+        searchRolls();
+      }
+    };
+  }
+  function dispose() {
+    if (activeImport === session) activeImport = null;
+    clearTimeout(searchTimer);
+    disposeImportLocation?.();
+    $('#editor').removeEventListener('close', dispose);
+  }
+  const session = { wizard, setFiles, dispose };
+  activeImport = session;
+  $('#editor').addEventListener('close', dispose, { once: true });
+  renderDestination();
+  setFiles(initialFiles);
 }
 async function uploadBatch(id) {
   if (STATE.uploading.has(id)) return;
@@ -2416,8 +3005,10 @@ function reconnectStorage(id) {
     'RECONNECT VOLUME',
   );
 }
+let commandRequest = 0;
 function command() {
   if ($('#editor').open) return;
+  clearTimeout(commandTimer);
   $('#command-input').value = '';
   $('#command-dialog').showModal();
   STATE.commandIndex = 0;
@@ -2425,6 +3016,7 @@ function command() {
   $('#command-input').focus();
 }
 async function updateCommands(text) {
+  const request = ++commandRequest;
   const commands = [
     ['档案馆 · 管理胶卷', () => navigate('archive')],
     ['看片台 · 全库照片', () => navigate('lighttable')],
@@ -2451,11 +3043,13 @@ async function updateCommands(text) {
         api('/rolls?filter=' + encodeURIComponent(JSON.stringify({ query: text, limit: 5 }))),
         api('/photos?filter=' + encodeURIComponent(JSON.stringify({ query: text, limit: 5 }))),
       ]);
-      if ($('#command-input').value !== text) return;
       results.push(
         ...rolls.items.map((r) => ({
-          label: r.code + ' · ' + r.name,
+          label: r.name,
+          detail: r.code,
           type: '胶卷',
+          mediaId: r.coverMedia,
+          placeholder: r.frameCount ? '无封面' : '空卷',
           run: () => {
             STATE.entities.set(r.id, r);
             navigate('lighttable', { rollId: r.id });
@@ -2463,8 +3057,11 @@ async function updateCommands(text) {
           },
         })),
         ...photos.items.map((p) => ({
-          label: p.name + ' · ' + p.rollName,
+          label: p.name,
+          detail: p.rollName,
           type: '照片',
+          mediaId: p.mime?.startsWith('video/') ? null : p.mediaId,
+          placeholder: p.mime?.startsWith('video/') ? '视频' : '无预览',
           run: () => {
             STATE.entities.set(p.id, p);
             reviewer.open([p]);
@@ -2473,13 +3070,19 @@ async function updateCommands(text) {
       );
     } catch {}
   }
+  if (
+    request !== commandRequest ||
+    !$('#command-dialog').open ||
+    $('#command-input').value !== text
+  )
+    return;
   STATE.commandActions = results;
   STATE.commandIndex = Math.min(STATE.commandIndex, Math.max(0, results.length - 1));
   $('#command-results').innerHTML =
     results
       .map(
         (item, index) =>
-          `<button class="command-item ${index === STATE.commandIndex ? 'active' : ''}" data-command="${index}"><span>${E(item.label)}</span><small>${item.type}</small></button>`,
+          `<button class="command-item ${index === STATE.commandIndex ? 'active' : ''}" data-command="${index}">${item.placeholder ? `<span class="command-thumb" aria-hidden="true">${item.mediaId ? `<img src="${thumb(item.mediaId, 320)}" alt="" loading="lazy" decoding="async">` : E(item.placeholder)}</span><span class="command-media-label" data-user-content><b>${E(item.label)}</b><small>${E(item.detail)}</small></span>` : `<span>${E(item.label)}</span>`}<small>${item.type}</small></button>`,
       )
       .join('') || '<div class="empty">没有匹配结果</div>';
 }
@@ -2579,6 +3182,19 @@ async function action(name, value, element) {
       break;
     case 'new-roll':
       newRoll();
+      break;
+    case 'edit-roll-tags':
+      editRollTags(STATE.entities.get(value));
+      break;
+    case 'filter-roll-tag':
+      navigate(
+        'archive',
+        { rollTag: value },
+        { view: STATE.workspace === 'archive' ? STATE.view : undefined },
+      );
+      break;
+    case 'edit-roll-stock':
+      editRollStock(STATE.entities.get(value));
       break;
     case 'custom-stock':
       customStock();
@@ -2765,6 +3381,7 @@ async function action(name, value, element) {
       $('.sidebar').classList.toggle('mobile-open');
       break;
     case 'inspector':
+      closeVersionPreview();
       if (innerWidth <= 960) $('.inspector').classList.toggle('mobile-open');
       else {
         STATE.layout.inspectorHidden = !STATE.layout.inspectorHidden;
@@ -2969,13 +3586,13 @@ async function action(name, value, element) {
       break;
     }
     case 'import':
-      chooseImport(STATE.query.rollId || null);
+      await chooseImport({ rollId: STATE.query.rollId });
       break;
     case 'import-roll':
-      chooseImport(value);
+      await chooseImport({ rollId: value, lockRoll: true });
       break;
     case 'import-version':
-      chooseImport(null, STATE.focus.id);
+      await chooseImport({ photoId: STATE.focus.id });
       break;
     case 'pick-files':
       $('#import-files').value = '';
@@ -3077,12 +3694,12 @@ async function action(name, value, element) {
       break;
     }
     case 'resume-upload':
-      STATE.resumeUploadId = value;
       modal(
         '继续导入来源',
-        `<p class="form-note">重新选择同一批来源文件或文件夹。已经完成的文件会跳过，未完成文件会从服务端断点继续，并在完成时核对完整 SHA-256。</p><div class="import-drop"><div>${!STATE.importTargetRoll && !STATE.importTargetPhoto ? '<button type="button" class="soft" data-action="new-storage">引用外置盘目录</button>' : ''}<button type="button" class="soft" data-action="pick-files">重选文件</button><button type="button" class="soft" data-action="pick-folder">重选文件夹</button></div></div>`,
+        `<p class="form-note">重新选择同一批来源文件或文件夹。已经完成的文件会跳过，未完成文件会从服务端断点继续，并在完成时核对完整 SHA-256。</p><div class="import-drop"><div><button type="button" class="soft" data-action="pick-files">重选文件</button><button type="button" class="soft" data-action="pick-folder">重选文件夹</button></div></div>`,
         null,
       );
+      STATE.resumeUploadId = value;
       break;
     case 'tasks':
       $('#task-drawer').hidden = !$('#task-drawer').hidden;
@@ -3464,7 +4081,7 @@ async function action(name, value, element) {
       const roll = STATE.entities.get(value) || (await api('/rolls/' + encodeURIComponent(value)));
       modal(
         '设置胶卷地点',
-        `<section class="roll-location-editor" data-edit-roll-location>${locationPickerFields('location', roll)}<button type="button" class="text" data-location-clear>清空地点和坐标</button></section>`,
+        `<section class="roll-location-editor" data-edit-roll-location>${locationPickerFields('location', roll)}<button type="button" class="text" data-location-clear>清空地点和坐标</button><p class="roll-location-help">拖动地图浏览，点击地图选择拍摄位置。</p></section>`,
         async (form) => {
           await patchRecord('rolls', roll.id, rollLocationPatch(formValues(form)));
           await bootstrap();
@@ -3642,14 +4259,21 @@ $('#editor-form').onsubmit = async (event) => {
   }
 };
 $('#editor').addEventListener('close', (event) => {
-  if (!event.target.open) STATE.editor = null;
+  if (!event.target.open) {
+    STATE.editor = null;
+    STATE.resumeUploadId = null;
+  }
 });
 $('#command-input').oninput = (event) => {
   clearTimeout(commandTimer);
+  commandRequest++;
   STATE.commandIndex = 0;
+  STATE.commandActions = [];
+  $('#command-results').innerHTML = '<p class="command-status" role="status">正在搜索…</p>';
   commandTimer = setTimeout(() => updateCommands(event.target.value), 160);
 };
 $('#command-input').onkeydown = (event) => {
+  if (event.isComposing || event.keyCode === 229 || !STATE.commandActions.length) return;
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault();
     STATE.commandIndex =
@@ -3667,7 +4291,8 @@ $('#command-input').onkeydown = (event) => {
 };
 for (const selector of ['#import-files', '#import-folder'])
   $(selector).onchange = (event) => {
-    const files = [...event.target.files].filter((file) => file.size > 0);
+    const files = [...event.target.files];
+    if (!files.length || !$('#editor').open) return;
     if (STATE.resumeUploadId) {
       const id = STATE.resumeUploadId;
       STATE.resumeUploadId = null;
@@ -3675,8 +4300,7 @@ for (const selector of ['#import-files', '#import-folder'])
       $('#editor').close();
       uploadBatch(id).catch((error) => toast(error.message, 'warning'));
     } else {
-      STATE.importFiles = files;
-      showImportWizard();
+      activeImport?.setFiles(files);
     }
   };
 $('#barcode-file').onchange = async (event) => {
@@ -3780,6 +4404,8 @@ document.addEventListener('drop', async (event) => {
   try {
     if ([...event.dataTransfer.types].includes('Files')) {
       event.preventDefault();
+      const session = $('#editor').open ? activeImport : null;
+      if ($('#editor').open && !session?.wizard.isConnected) return;
       const result = [];
       async function collect(entry, path = '') {
         if (entry.isFile)
@@ -3806,9 +4432,12 @@ document.addEventListener('drop', async (event) => {
         if (entry) await collect(entry);
         else if (item.getAsFile()) result.push(item.getAsFile());
       }
-      chooseImport(STATE.query.rollId || null);
-      STATE.importFiles = result;
-      showImportWizard();
+      if (!result.length) result.push(...event.dataTransfer.files);
+      if (session) {
+        if (activeImport === session) session.setFiles(result);
+      } else if (!$('#editor').open && result.length) {
+        await chooseImport({ rollId: STATE.query.rollId, initialFiles: result });
+      }
       return;
     }
     const column = event.target.closest('[data-column]');
@@ -3952,6 +4581,10 @@ document.addEventListener('keydown', async (event) => {
       return;
     }
     if (event.key === 'Escape') {
+      if (versionPreview) {
+        closeVersionPreview();
+        return;
+      }
       clearSelection();
       $('.inspector').classList.remove('mobile-open');
       $('.sidebar').classList.remove('mobile-open');
@@ -3966,6 +4599,12 @@ document.addEventListener('keydown', async (event) => {
       refresh();
     }
     if (event.key === 'Enter' && STATE.focus) {
+      if (
+        event.target.closest(
+          '.version-row button, .roll-tag-section button, [data-action="edit-roll-stock"]',
+        )
+      )
+        return;
       STATE.focus.entity === 'photos'
         ? await openPhoto(STATE.focus.id)
         : await action('roll-photos', STATE.focus.id);
@@ -4034,12 +4673,18 @@ document.addEventListener(
   'error',
   (event) => {
     const image = event.target;
-    if (image.tagName !== 'IMG' || image.closest('#reviewer') || !image.src.includes('/preview/'))
+    if (
+      image.tagName !== 'IMG' ||
+      image.closest('#reviewer, .version-preview') ||
+      !image.src.includes('/preview/')
+    )
       return;
     image.hidden = true;
     const hint = document.createElement('span');
     hint.className = 'preview-unavailable';
-    hint.textContent = '暂无预览 · 连接原片后重试';
+    hint.textContent = image.closest('.version-thumbnail, .import-target-thumb, .command-thumb')
+      ? '无预览'
+      : '暂无预览 · 连接原片后重试';
     image.parentElement.append(hint);
   },
   true,

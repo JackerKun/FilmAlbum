@@ -6,6 +6,8 @@
 
 Real UI captures from the current source, using an isolated fixture: **72 rolls, 1,442 visible frame records and 17 reused synthetic images**. Captured on 2026-11-12. No personal library or photographs are used.
 
+2026-11-19 补充导入、扫描版本、检索、色标和胶卷地点五张截图，仍使用同一套模拟数据。
+
 ## 图片索引
 
 | 文件                                           | 展示内容                             |
@@ -16,6 +18,11 @@ Real UI captures from the current source, using an isolated fixture: **72 rolls,
 | `timeline.webp`                                | 年月摄影时间轴                       |
 | `film-135.webp` / `film-120.webp`              | 两种画幅的暗盒、卷轴与胶片           |
 | `lighttable.webp`                              | 大图选片、缩略图、直方图与位置       |
+| `import-existing-roll.webp`                    | 搜索已有胶卷与封面预览               |
+| `scan-version-preview.webp`                    | 扫描版本缩略图与悬停预览             |
+| `global-search-thumbnails.webp`                | 标签检索、胶卷封面和照片缩略图       |
+| `photo-color-filter.webp`                      | 照片属性和搜索筛选中的色标           |
+| `roll-location-large.webp`                     | 胶卷拍摄地点的大地图                 |
 | `projects.webp`                                | 项目章节、候选与定稿照片             |
 | `map.webp` / `map-roll-picker.webp`            | 回忆地图、选中胶卷与组合筛选         |
 | `library.webp`                                 | 资料库、预览覆盖与存储状态           |

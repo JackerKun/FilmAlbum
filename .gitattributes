@@ -10,4 +10,5 @@
 *.ico binary
 *.icns binary
 *.otf binary
+*.pdf binary
 *.gz binary

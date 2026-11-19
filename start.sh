@@ -3,6 +3,14 @@ set -euo pipefail
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
+if [[ "${1:-}" == '--help' || "${1:-}" == '-h' ]]; then
+  cat <<'EOF'
+./start.sh           启动 Film Album 桌面版
+./start.sh --demo    启动独立模拟库，首次运行自动生成示例数据
+EOF
+  exit 0
+fi
+
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
   echo '启动 Film Album 需要 Node.js 22.13+ 和 npm。' >&2
   exit 1

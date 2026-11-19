@@ -46,9 +46,18 @@ The app checks for the latest stable GitHub Release in the background at startup
 
 Browse all rolls as cards, a table, a film shelf, film strips or a timeline. Load 50 rolls at a time as you scroll. Film strips start expanded for browsing several rolls vertically; individual 135 cassettes and 120 spools have distinct pull-out views. Back and Forward restore earlier browsing positions.
 
-Create rolls with film stock selection, date controls and a shooting location on the map. Batch editing uses field-appropriate controls: choose ratings, colors and states; type notes, tags and equipment names; set locations on a map.
+Add or remove roll tags in the details sidebar. Filter by tag in the roll archive, or use global search to find both rolls and photographs with covers and thumbnails in the results. Pick a camera or lens from existing entries, or type a new one. Open the larger location map to pan, zoom and place a pin for the roll.
 
 ![Multiple expanded film strips in the archive](docs/screenshots/archive-film.webp)
+
+<details>
+<summary>Global search and roll location</summary>
+
+![Tag search with roll covers and photo thumbnails](docs/screenshots/global-search-thumbnails.webp)
+
+![Expanded roll location map for panning, zooming and pin placement](docs/screenshots/roll-location-large.webp)
+
+</details>
 
 <details>
 <summary>New roll, timeline and 135 / 120 film</summary>
@@ -63,13 +72,28 @@ Create rolls with film stock selection, date controls and a shooting location on
 
 </details>
 
-### Review, scan versions and the memory map
+### Import, scan versions and review
 
-Preview roll grouping, frame numbers, ordering and duplicates before importing. Attach rescans to the same frame and choose a primary version. Compare one, two or four photographs with ratings, color labels and rejection flags.
+- **New roll** creates a record for the film stock, equipment and shooting information so you can add scans later.
+- **Import images** files existing scans in one new roll, one roll per folder, or a roll you find by name, archive code or camera. Existing rolls show cover thumbnails. When creating a roll during import, search for film stock or apply a saved roll template to fill in stock, format and equipment.
+- **Add scan version** attaches a rescan or edit to the same frame. Version thumbnails show a larger preview on hover, with controls to open, rename, set as primary or compare with the primary version.
+
+Preview roll grouping, frame numbers, ordering and duplicates before importing. Review one, two or four photographs with ratings, color labels and rejection flags. Color menus show swatches in the photo sidebar and search filters.
 
 The large-photo information panel brings together photo, roll and scan details, EXIF, histogram and location. Its map shortcut opens the memory map with the current roll selected. Contact sheets remain available as an export from a roll's toolbar.
 
 ![Photo review with frame sequence, histogram and shooting location](docs/screenshots/lighttable.webp)
+
+<details>
+<summary>Existing roll import, scan versions and color filters</summary>
+
+![Finding an existing roll by archive code with its cover in the result](docs/screenshots/import-existing-roll.webp)
+
+![A larger scan preview on hover beside the version controls](docs/screenshots/scan-version-preview.webp)
+
+![Color swatches in the search filter and photo sidebar](docs/screenshots/photo-color-filter.webp)
+
+</details>
 
 <details>
 <summary>Memory map, roll placement and projects</summary>
@@ -186,7 +210,9 @@ cd FilmAlbum
 ./start.sh
 ```
 
-`start.sh` checks the environment, installs missing dependencies and starts the desktop app. Alternatively:
+`start.sh` checks the environment, installs missing dependencies and starts the desktop app. Run `./start.sh --demo` to try it with an isolated demo library containing 8 rolls, 98 frame records, scan versions, map locations, and a sample photobook. Edits to the demo carry over to future demo sessions. Run `./start.sh` to open your regular library.
+
+You can also start the desktop app manually:
 
 ```bash
 npm ci
@@ -205,6 +231,8 @@ node scripts/qa-photobook.mjs    # Book screenshots, interaction and PDF regress
 ```
 
 [Usage guide](docs/USER_GUIDE.md) · [Photobook studio](docs/photobook-studio.md) · [Screenshots and fixtures](docs/screenshots/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Build and release](BUILDING.md)
+
+[Illustrated Chinese manual (PDF, version 3.2.0)](output/pdf/FilmAlbum-3.2.0-使用说明书.pdf) · [3.3.0 release notes](docs/RELEASE-NOTES.md)
 
 This is preview software. The Windows image engine supports JPEG, PNG, TIFF and WebP scans, but does not currently decode HEIC or camera RAW. Default release builds lack distribution signing and Apple notarization. The new photobook format has no dedicated migration workflow for old books.
 

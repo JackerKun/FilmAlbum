@@ -1,9 +1,24 @@
 import { Catalog, uid, json } from './catalog.mjs';
 import { bookStore } from './books.mjs';
 import { native } from './native.mjs';
-import { mkdir, writeFile, readFile, stat, copyFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, stat, copyFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+
+export async function startupDemoRoot(home) {
+  const root = join(home, 'startup-demo');
+  try {
+    if ((await stat(join(root, 'catalog.sqlite'))).isFile()) return root;
+    throw Error('模拟资料库目录中的 catalog.sqlite 不是文件');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  const { destination } = await seedDemo(home);
+  // Expose the library only after the seed has finished and closed SQLite.
+  await rename(destination, root);
+  return root;
+}
+
 export async function seedDemo(home, progress = () => {}) {
   const root = join(home, 'demo-libraries', uid());
   await mkdir(root, { recursive: true });
@@ -57,6 +72,7 @@ export async function seedDemo(home, progress = () => {}) {
             format: i % 3 === 0 ? '120 · 6×7' : '135',
             date: `${2020 + (i % 6)}-${String(i + 1).padStart(2, '0')}-12`,
             camera: i % 2 ? 'Leica M6' : 'Mamiya 7',
+            tags: ['旅行手记', i % 2 ? '自然风景' : '城市漫游'],
             location: name.slice(0, 2),
             latitude,
             longitude,

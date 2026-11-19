@@ -1,37 +1,27 @@
-## Film Album 3.2.0 · 画册工作台
+## Film Album 3.3.0 · 导入与检索
 
 ### 本次更新
 
-- **重新设计画册创作流程**：从选片、风格与结构到全册初稿；按胶卷和相机筛选，支持 Shift 连选与批量加入。规格提供分类、筛选和比例缩略图。
-- **更多编排风格**：12 套整册风格，支持封面、章节、注释、胶卷手记、地图与底片索引；保留手动调整或锁定的页面。
-- **更顺手的编辑工作区**：整册、跨页、单页与阅读预览均支持缩放；空格＋鼠标拖动平移。整册单击选页、双击编辑、拖动整页排序；两侧素材和属性栏可独立折叠。
-- **精确排版工具**：拖动吸附、对齐与等距分布、毫米网格、自定义辅助线、元素右键菜单；稳定工具栏提供图标、文字或图文显示。
-- **照片与装饰**：形状蒙版、30 款分类胶片与相机贴图、自定义图片；搜索地点、预览地图、框选范围并贴入页面，保存地图快照供离线使用。
-- **阅读与输出**：阅读居中、方向键翻页与全屏；修复 PDF 中文字体问题，三种 PDF 导出提供等待动画与进度，保留蒙版、贴图和地图。
-- **文档与演示**：重写中英文 README，使用 72 卷、1,442 条底片记录的独立演示库更新 27 张界面截图。
+- **导入影像**可新建一卷、按文件夹分卷或装入已有卷。搜索已有卷时显示卷名和封面。胶片型号可搜索，建卷时可套用保存的胶卷模板。
+- **扫描版本**显示缩略图，悬停可看大图。保留查看、命名、切换主版本和与主版本对比。加入扫描版本时会显示目标底片。
+- **胶卷档案**可直接添加、移除和筛选整卷标签。相机和镜头可点选已有记录或手动输入，胶片型号可通过搜索更换。
+- **搜索与选片**在全局结果中显示胶卷封面和照片缩略图；属性、搜索筛选、看片台和批量修改的色标都带颜色。
+- **地图与演示**扩大胶卷地点地图。源码可用 `./start.sh --demo` 打开独立模拟库，试用时的修改会保留。
+- **文档**更新中英文 README，补充五张模拟库截图，并收录 3.2.0 中文图解 PDF 说明书。
 
 ### What's new
 
-- Rebuilt the three-step photobook workflow with roll/camera filters, Shift range selection, batch selection and a categorized size gallery.
-- Added 12 book styles, chapter structures, captions, roll notes, location maps and frame indexes, with options to preserve manually edited pages.
-- Added zoom and Space-drag panning, centered reading and spread views, keyboard page navigation, fullscreen, whole-page reordering and independent collapsible panels.
-- Added snapping, alignment, distribution, millimeter grids, custom guides, element context menus and stable icon/text toolbars.
-- Added photo shape masks, 30 categorized film/camera stickers, custom images and searchable maps with rectangular cropping and saved snapshots.
-- Fixed Chinese PDF typography and added export progress for reading, print-interior and full-cover PDFs.
-- Rewrote both READMEs and refreshed 27 screenshots using an isolated 72-roll, 1,442-frame demo library.
-
-### 使用提示 / Notes
-
-- 新版画册没有旧画册的专门迁移流程；已有资料库升级前建议备份。胶卷档案与原片仍保留在本地资料库。
-- There is no dedicated migration for legacy photobooks. Back up existing libraries before upgrading.
-- PDF 输出为 RGB，暂不提供 CMYK / PDF-X 或印厂拼版。在线地图搜索和底图需要网络，已保存快照可离线使用。
-- PDFs use RGB; CMYK / PDF-X and print imposition are not provided. Online map search and tiles need connectivity; saved snapshots work offline.
+- Import scans into one new roll, one roll per folder, or an existing roll. Search existing rolls with cover thumbnails, look up film stock, and apply saved roll templates.
+- Preview scan versions on hover. Open, rename, set the primary version, or compare against it. The add-version dialog identifies the target frame.
+- Add, remove and filter roll tags. Pick previously recorded cameras and lenses or enter new ones, and search when replacing a roll's film stock.
+- See roll covers and photo thumbnails in global search, and color swatches in the sidebar, filters, review and batch editing.
+- Pan and place pins in a larger roll location map. Start a persistent, separate demo library from source with `./start.sh --demo`.
+- Read the updated Chinese and English READMEs with five new demo screenshots and an illustrated Chinese PDF manual for 3.2.0.
 
 ### 安装包 / Packages
 
-- macOS 13+，Apple Silicon 与 Intel，DMG 和 ZIP。
-- Windows x64 与 ARM64，安装 EXE 和 ZIP。使用 ZIP 时，请完整解压后运行 `Film Album.exe`。
-- 使用 `SHA256SUMS` 核对安装包。默认发行包使用 macOS 临时签名，Apple 公证和 Windows Authenticode 签名尚未配置。
-- macOS 13+ packages include DMG and ZIP for Apple Silicon and Intel.
-- Windows packages include setup EXE and ZIP for x64 and ARM64. Extract the full ZIP before launching `Film Album.exe`.
-- Verify packages with `SHA256SUMS`. macOS packages use ad-hoc signing. Apple notarization and Windows Authenticode signing are pending.
+- macOS 13+：Apple Silicon 与 Intel，DMG 和 ZIP。
+- Windows：x64 与 ARM64，安装 EXE 和 ZIP。使用 ZIP 时请完整解压，再运行 `Film Album.exe`。
+- 下载后可用 `SHA256SUMS` 核对文件。macOS 安装包使用临时签名。
+- macOS 13+ packages include DMG and ZIP for Apple Silicon and Intel. Windows packages include setup EXE and ZIP for x64 and ARM64. Extract the full ZIP before launching `Film Album.exe`.
+- Verify downloads with `SHA256SUMS`. macOS packages use ad-hoc signing.

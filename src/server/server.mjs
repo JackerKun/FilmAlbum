@@ -40,6 +40,10 @@ const MIME = {
 };
 
 await mkdir(MEDIA_DIR, { recursive: true });
+const demoRoot =
+  process.env.FILMALBUM_STARTUP_DEMO === '1'
+    ? await (await import('./demo.mjs')).startupDemoRoot(DATA_DIR)
+    : undefined;
 
 function send(response, status, body = '', headers = {}) {
   if (process.env.FILMALBUM_DESKTOP_TOKEN)
@@ -457,8 +461,10 @@ server.on('error', (error) => {
   process.exitCode = 1;
 });
 server.listen(PORT, '127.0.0.1', () => {
-  studio = new StudioService(DATA_DIR, (request, response, path, mime) =>
-    streamMedia(request, response, path, { contentType: mime }),
+  studio = new StudioService(
+    DATA_DIR,
+    (request, response, path, mime) => streamMedia(request, response, path, { contentType: mime }),
+    { initialRoot: demoRoot },
   );
   console.log(`FilmAlbum: http://127.0.0.1:${server.address().port}`);
   process.parentPort?.postMessage({ type: 'ready', port: server.address().port });

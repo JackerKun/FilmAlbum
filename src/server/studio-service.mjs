@@ -57,7 +57,7 @@ const hashFile = async (path) => {
   return h.digest('hex');
 };
 export class StudioService {
-  constructor(home, stream) {
+  constructor(home, stream, { initialRoot } = {}) {
     this.home = resolve(home);
     this.placeSearch = new PlaceSearch(this.home);
     this.root = this.home;
@@ -65,14 +65,14 @@ export class StudioService {
     this.previews = new PreviewCache(this.home);
     this.locks = new Map();
     this.jobs = new Jobs(this.home, true);
-    this.initialize();
+    this.initialize(initialRoot);
   }
-  initialize() {
+  initialize(initialRoot) {
     let config = {};
     try {
       config = JSON.parse(requireRead(join(this.home, 'session.json')));
     } catch {}
-    this.root = config.activeRoot || this.home;
+    this.root = initialRoot || config.activeRoot || this.home;
     try {
       this.catalog = new Catalog(this.root);
       this.error = null;

@@ -626,6 +626,11 @@ export class Catalog {
         query.tag,
         query.tag,
       );
+    if (!photo && query.rollTag)
+      add(
+        "EXISTS(SELECT 1 FROM json_each(r.data,'$.tags') WHERE type='text' AND value=?)",
+        query.rollTag,
+      );
     if (query.rollId && photo) add('p.roll_id=?', query.rollId);
     for (const field of ['stock', 'format', 'status', 'camera', 'lens', 'location', 'project'])
       if (query[field] && query[field] !== 'all') add(`r.${field}=?`, String(query[field]));
@@ -907,6 +912,11 @@ export class Catalog {
     out.tags = this.db
       .prepare(
         "SELECT j.value AS value,COUNT(*) AS count FROM photos p JOIN rolls r ON r.id=p.roll_id, json_each(p.data,'$.tags') j WHERE p.deleted_at IS NULL AND r.deleted_at IS NULL AND j.type='text' AND j.value<>'' GROUP BY j.value ORDER BY count DESC LIMIT 300",
+      )
+      .all();
+    out.rollTags = this.db
+      .prepare(
+        "SELECT j.value AS value, COUNT(DISTINCT r.id) AS count FROM rolls r, json_each(r.data,'$.tags') j WHERE r.deleted_at IS NULL AND j.type='text' AND j.value<>'' GROUP BY j.value ORDER BY count DESC, j.value COLLATE NOCASE LIMIT 300",
       )
       .all();
     out.years = this.db
